@@ -1,0 +1,237 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v[0-9]+.*'
+
+permissions:
+  contents: write
+  packages: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  ci:
+    name: Run CI
+    uses: ./.github/workflows/ci.yml
+
+  create-release:
+    needs: ci
+    name: Create Release
+    runs-on: ubuntu-latest
+    outputs:
+      upload_url: ${{ steps.create_release.outputs.upload_url }}
+      version: ${{ steps.get_version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Get version from tag
+        id: get_version
+        run: echo "version=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+
+      - name: Create Release
+        id: create_release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ github.ref }}
+          release_name: FlashCron v${{ steps.get_version.outputs.version }}
+          body: |
+            ## FlashCron v${{ steps.get_version.outputs.version }}
+
+            ### Installation
+
+            Download the appropriate binary for your platform below.
+
+            **Linux (x86_64)**:
+            ```bash
+            curl -LO https://github.com/${{ github.repository }}/releases/download/v${{ steps.get_version.outputs.version }}/flashcron-linux-x86_64.tar.gz
+            tar xzf flashcron-linux-x86_64.tar.gz
+            sudo mv flashcron /usr/local/bin/
+            ```
+
+            **macOS (x86_64)**:
+            ```bash
+            curl -LO https://github.com/${{ github.repository }}/releases/download/v${{ steps.get_version.outputs.version }}/flashcron-macos-x86_64.tar.gz
+            tar xzf flashcron-macos-x86_64.tar.gz
+            sudo mv flashcron /usr/local/bin/
+            ```
+
+            **macOS (Apple Silicon)**:
+            ```bash
+            curl -LO https://github.com/${{ github.repository }}/releases/download/v${{ steps.get_version.outputs.version }}/flashcron-macos-aarch64.tar.gz
+            tar xzf flashcron-macos-aarch64.tar.gz
+            sudo mv flashcron /usr/local/bin/
+            ```
+
+            **Windows**:
+            Download `flashcron-windows-x86_64.zip` and extract to a directory in your PATH.
+
+            ### Cargo
+
+            ```bash
+            cargo install flashcron
+            ```
+
+            ### Changes
+
+            See [CHANGELOG.md](https://github.com/${{ github.repository }}/blob/main/CHANGELOG.md) for details.
+          draft: false
+          prerelease: ${{ contains(github.ref, '-') }}
+
+  build-binaries:
+    name: Build ${{ matrix.target }}
+    needs: create-release
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Linux
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-latest
+            name: flashcron-linux-x86_64
+            ext: tar.gz
+
+          - target: x86_64-unknown-linux-musl
+            os: ubuntu-latest
+            name: flashcron-linux-x86_64-musl
+            ext: tar.gz
+
+          - target: aarch64-unknown-linux-gnu
+            os: ubuntu-latest
+            name: flashcron-linux-aarch64
+            ext: tar.gz
+
+          # macOS
+          - target: x86_64-apple-darwin
+            os: macos-latest
+            name: flashcron-macos-x86_64
+            ext: tar.gz
+
+          - target: aarch64-apple-darwin
+            os: macos-latest
+            name: flashcron-macos-aarch64
+            ext: tar.gz
+
+          # Windows
+          - target: x86_64-pc-windows-msvc
+            os: windows-latest
+            name: flashcron-windows-x86_64
+            ext: zip
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Install cross-compilation tools
+        if: matrix.target == 'aarch64-unknown-linux-gnu'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu
+
+      - name: Install musl tools
+        if: matrix.target == 'x86_64-unknown-linux-musl'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y musl-tools
+
+      - name: Build release binary
+        run: cargo build --release --target ${{ matrix.target }}
+        env:
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
+
+      - name: Prepare release archive (Unix)
+        if: runner.os != 'Windows'
+        run: |
+          cd target/${{ matrix.target }}/release
+          strip flashcron || true
+          tar czf ../../../${{ matrix.name }}.${{ matrix.ext }} flashcron
+          cd ../../..
+
+      - name: Prepare release archive (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          cd target/${{ matrix.target }}/release
+          7z a ../../../${{ matrix.name }}.${{ matrix.ext }} flashcron.exe
+          cd ../../..
+
+      - name: Upload release asset
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ needs.create-release.outputs.upload_url }}
+          asset_path: ./${{ matrix.name }}.${{ matrix.ext }}
+          asset_name: ${{ matrix.name }}.${{ matrix.ext }}
+          asset_content_type: application/octet-stream
+
+      - name: Calculate SHA256
+        id: sha256
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" == "Windows" ]; then
+            sha256sum ${{ matrix.name }}.${{ matrix.ext }} | cut -d ' ' -f 1 > ${{ matrix.name }}.sha256
+          else
+            shasum -a 256 ${{ matrix.name }}.${{ matrix.ext }} | cut -d ' ' -f 1 > ${{ matrix.name }}.sha256
+          fi
+
+      - name: Upload SHA256
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ needs.create-release.outputs.upload_url }}
+          asset_path: ./${{ matrix.name }}.sha256
+          asset_name: ${{ matrix.name }}.sha256
+          asset_content_type: text/plain
+
+  publish-crate:
+    name: Publish to crates.io
+    needs: [create-release, build-binaries]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Publish to crates.io
+        run: cargo publish --token ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        continue-on-error: true
+
+  build-docker:
+    name: Build Docker Image
+    needs: create-release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          platforms: linux/amd64,linux/arm64
+          tags: |
+            ghcr.io/${{ github.repository }}:${{ needs.create-release.outputs.version }}
+            ghcr.io/${{ github.repository }}:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

@@ -1,0 +1,139 @@
+# FlashCron Example Configuration
+# Copy this file to flashcron.toml and customize for your needs
+
+#==============================================================================
+# Global Settings
+#==============================================================================
+[settings]
+# Log level: trace, debug, info, warn, error
+log_level = "info"
+
+# Output logs in JSON format (useful for log aggregators)
+json_logs = false
+
+# Maximum number of jobs that can run simultaneously (0 = unlimited)
+max_concurrent_jobs = 10
+
+# Default shell for executing commands
+# Linux/macOS: "/bin/sh", "/bin/bash"
+# Windows: "cmd", "powershell"
+shell = "/bin/sh"
+
+# Automatically reload config when file changes
+watch_config = true
+
+# Number of job executions to keep in history
+history_size = 1000
+
+# Default timezone for cron expressions
+timezone = "UTC"
+
+# Grace period (seconds) for graceful shutdown
+shutdown_grace_period = 30
+
+#==============================================================================
+# Job Definitions
+#==============================================================================
+
+# Simple example: Echo every minute
+[jobs.heartbeat]
+schedule = "* * * * *"
+command = "echo 'FlashCron is alive!'"
+description = "Simple heartbeat job"
+enabled = true
+
+# Daily backup at 2 AM
+[jobs.daily_backup]
+schedule = "0 2 * * *"
+command = "/usr/local/bin/backup.sh --full"
+description = "Full daily backup"
+enabled = true
+timeout = 7200              # 2 hour timeout
+retry_count = 3             # Retry up to 3 times on failure
+retry_delay = 300           # Wait 5 minutes between retries
+working_dir = "/var/backups"
+environment = { BACKUP_TYPE = "full", NOTIFY_EMAIL = "admin@example.com" }
+
+# Cleanup old files every 6 hours
+[jobs.cleanup_temp]
+schedule = "0 */6 * * *"
+command = "find /tmp -type f -mtime +7 -delete"
+description = "Remove temp files older than 7 days"
+enabled = true
+timeout = 300
+
+# Database maintenance - weekly on Sunday at 3 AM
+[jobs.db_maintenance]
+schedule = "0 3 * * 0"
+command = "/opt/scripts/db-vacuum.sh"
+description = "Weekly database maintenance"
+enabled = true
+timeout = 3600
+tags = ["database", "maintenance"]
+
+# SSL certificate renewal check - daily at noon
+[jobs.ssl_check]
+schedule = "0 12 * * *"
+command = "certbot renew --quiet"
+description = "Check and renew SSL certificates"
+enabled = true
+run_on_startup = true       # Also run when daemon starts
+
+# Custom shell example - using bash specifically
+[jobs.complex_script]
+schedule = "30 4 * * *"
+command = "source ~/.bashrc && run_analysis.sh"
+description = "Complex analysis with bash features"
+enabled = true
+shell = "/bin/bash"
+working_dir = "/opt/analysis"
+
+# Health check every 5 minutes
+[jobs.health_check]
+schedule = "*/5 * * * *"
+command = "curl -sf http://localhost:8080/health || exit 1"
+description = "Application health check"
+enabled = true
+timeout = 30
+capture_output = true
+max_output_size = 4096
+
+# Report generation - weekdays at 8 AM
+[jobs.daily_report]
+schedule = "0 8 * * 1-5"
+command = "/opt/scripts/generate-report.py --format pdf --send-email"
+description = "Generate and send daily report"
+enabled = true
+timeout = 600
+environment = { PYTHONPATH = "/opt/scripts", SMTP_HOST = "mail.example.com" }
+tags = ["reporting", "email"]
+
+# Disabled job example
+[jobs.deprecated_task]
+schedule = "0 0 * * *"
+command = "echo 'This job is disabled'"
+description = "Old task - kept for reference"
+enabled = false
+
+#==============================================================================
+# Advanced Examples
+#==============================================================================
+
+# High-frequency job with limited output capture
+[jobs.metrics_collect]
+schedule = "* * * * *"
+command = "/opt/bin/collect-metrics"
+description = "Collect system metrics every minute"
+enabled = true
+timeout = 55
+capture_output = false      # Don't capture output for performance
+
+# Job with environment-specific config
+[jobs.deploy_staging]
+schedule = "0 0 * * *"
+command = "/opt/deploy/deploy.sh"
+description = "Deploy to staging environment"
+enabled = true
+environment = { ENV = "staging", DRY_RUN = "false" }
+working_dir = "/opt/deploy"
+tags = ["deploy", "staging"]

@@ -43,6 +43,7 @@ Traditional cron daemons get the job done, but they weren't built for speed. **F
 
 ### Core Functionality
 - **Standard Cron Expressions**: Full 5-field cron syntax support
+- **Timezone Support**: Run jobs in any timezone, with flexible priority logic
 - **TOML Configuration**: Human-readable, version-control friendly
 - **Hot Reload**: Automatic config reload on file changes
 - **Graceful Shutdown**: Waits for running jobs to complete
@@ -166,6 +167,29 @@ flashcron run -c flashcron.toml
 
 ---
 
+## Timezone Support
+
+FlashCron supports running jobs in any timezone. The timezone is determined using the following priority (highest to lowest):
+
+1. **`TZ` Environment Variable**: If set, this timezone will be used globally.
+2. **`settings.timezone`**: Configuration setting in your TOML file.
+3. **System Timezone**: Automatically detected from your operating system.
+4. **UTC**: The ultimate fallback if no other timezone is found.
+
+### Configuration Example
+
+```toml
+[settings]
+# Use system timezone (default)
+timezone = "System"
+# Or explicitly set one:
+# timezone = "Asia/Shanghai"
+```
+
+The `list` and `schedule` commands will also display times in the effective timezone for consistency.
+
+---
+
 ## CLI Reference
 
 | Command | Description |
@@ -200,6 +224,7 @@ max_concurrent_jobs = 10     # 0 = unlimited
 shell = "/bin/sh"            # Default shell
 watch_config = true          # Hot reload on config changes
 history_size = 1000          # Job execution history size
+timezone = "System"          # Timezone (e.g., "System", "UTC", "Asia/Shanghai")
 shutdown_grace_period = 30   # Seconds to wait on shutdown
 print_output = false         # Whether to print job output to logs
 ```

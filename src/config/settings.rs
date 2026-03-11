@@ -1,7 +1,9 @@
 //! Global settings configuration
 
+use chrono_tz::Tz;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
+use std::str::FromStr;
 
 /// Global settings for the daemon
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -97,7 +99,7 @@ fn default_history_size() -> usize {
 }
 
 fn default_timezone() -> String {
-    "UTC".to_string()
+    "System".to_string()
 }
 
 fn default_grace_period() -> u64 {
@@ -131,6 +133,37 @@ impl Default for Settings {
 }
 
 impl Settings {
+    /// Get the effective timezone based on priority:
+    /// 1. TZ environment variable
+    /// 2. Configured timezone (if not "System")
+    /// 3. System timezone
+    /// 4. UTC (fallback)
+    pub fn effective_timezone(&self) -> Tz {
+        // 1. TZ environment variable
+        if let Ok(tz_str) = std::env::var("TZ") {
+            if let Ok(tz) = Tz::from_str(&tz_str) {
+                return tz;
+            }
+        }
+
+        // 2. Configured timezone (if not the default "System")
+        if self.timezone != "System" {
+            if let Ok(tz) = Tz::from_str(&self.timezone) {
+                return tz;
+            }
+        }
+
+        // 3. System timezone
+        if let Ok(tz_str) = iana_time_zone::get_timezone() {
+            if let Ok(tz) = Tz::from_str(&tz_str) {
+                return tz;
+            }
+        }
+
+        // 4. Fallback to UTC
+        Tz::UTC
+    }
+
     /// Get the shell command parts for executing a command
     pub fn shell_command(&self) -> (&str, &[String]) {
         (&self.shell, &self.shell_args)

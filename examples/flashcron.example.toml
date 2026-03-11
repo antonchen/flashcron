@@ -25,8 +25,10 @@ watch_config = true
 # Number of job executions to keep in history
 history_size = 1000
 
-# Default timezone for cron expressions
-timezone = "UTC"
+# Timezone for cron expressions and log display
+# Priority: TZ environment variable > this setting > system timezone > UTC
+# Supported formats: "System", "UTC", "Asia/Shanghai", "America/New_York", etc.
+timezone = "System"
 
 # Grace period (seconds) for graceful shutdown
 shutdown_grace_period = 30

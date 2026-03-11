@@ -91,6 +91,11 @@ print_output = false
 # Enable config file watching for hot reload
 watch_config = true
 
+# Timezone for job scheduling and display
+# Priority: TZ env variable > config > system timezone > UTC
+# Examples: "System", "UTC", "Asia/Shanghai", "America/New_York"
+timezone = "System"
+
 # Prometheus metrics endpoint (requires 'metrics' feature)
 # metrics_addr = "127.0.0.1:9090"
 

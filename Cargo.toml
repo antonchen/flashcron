@@ -28,6 +28,8 @@ toml = "0.8"
 # Cron parsing
 cron = "0.12"
 chrono = { version = "0.4", features = ["serde"] }
+chrono-tz = "0.10"
+iana-time-zone = "0.1.65"
 
 # Logging
 tracing = "0.1"

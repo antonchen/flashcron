@@ -107,11 +107,12 @@ impl Scheduler {
 
     /// Initialize the scheduler state from config
     async fn initialize(&mut self) -> Result<()> {
-        let config = self.config.read().await;
+        let config_lock = self.config.read().await;
+        let tz = config_lock.settings.effective_timezone();
         let mut state = self.state.write().await;
 
-        for (name, job) in config.enabled_jobs() {
-            let next_run = job.next_run();
+        for (name, job) in config_lock.enabled_jobs() {
+            let next_run = job.next_run(tz).map(|t| t.with_timezone(&Utc));
             let scheduled_job = ScheduledJob::new(name.clone(), job.schedule.clone(), job.enabled)
                 .with_next_run(next_run);
 
@@ -126,8 +127,8 @@ impl Scheduler {
         }
 
         info!(
-            "Scheduler initialized with {} jobs ({} enabled)",
-            state.total_jobs, state.enabled_jobs
+            "Scheduler initialized with {} jobs ({} enabled), timezone: {}",
+            state.total_jobs, state.enabled_jobs, tz
         );
 
         Ok(())
@@ -229,7 +230,8 @@ impl Scheduler {
         let job = trigger.job.clone();
 
         // Schedule next occurrence
-        if let Some(next) = job.next_run() {
+        let tz = self.config.read().await.settings.effective_timezone();
+        if let Some(next) = job.next_run(tz).map(|t| t.with_timezone(&Utc)) {
             // Make sure we don't schedule the same time again
             if next > trigger.scheduled_at {
                 self.trigger_queue.push(TimedTrigger {
@@ -266,10 +268,11 @@ impl Scheduler {
         let event_tx = self.event_tx.clone();
         let semaphore = Arc::clone(&self.job_semaphore);
         
-        let config = self.config.read().await;
+        let config_lock = self.config.read().await;
+        let config = config_lock.clone();
         let history_size = config.settings.history_size;
         let print_output = job.print_output.unwrap_or(config.settings.print_output);
-        drop(config);
+        drop(config_lock);
 
         tokio::spawn(async move {
             // Acquire semaphore permit
@@ -325,7 +328,8 @@ impl Scheduler {
                             duration_ms = %duration.as_millis(),
                             "Job completed successfully"
                         );
-                        (JobStatus::Success, job.next_run())
+                        let tz = config.settings.effective_timezone();
+                        (JobStatus::Success, job.next_run(tz).map(|t| t.with_timezone(&Utc)))
                     } else {
                         let error = format!("Exit code: {}", exit_code);
                         execution.complete_failed(error.clone(), Some(exit_code), stdout, stderr);
@@ -334,19 +338,22 @@ impl Scheduler {
                             exit_code = %exit_code,
                             "Job failed"
                         );
-                        (JobStatus::Failed { error }, job.next_run())
+                        let tz = config.settings.effective_timezone();
+                        (JobStatus::Failed { error }, job.next_run(tz).map(|t| t.with_timezone(&Utc)))
                     }
                 }
                 Err(Error::JobTimeout { .. }) => {
                     execution.complete_timeout();
                     warn!(job = %job_name, "Job timed out");
-                    (JobStatus::Timeout, job.next_run())
+                    let tz = config.settings.effective_timezone();
+                    (JobStatus::Timeout, job.next_run(tz).map(|t| t.with_timezone(&Utc)))
                 }
                 Err(e) => {
                     let error = e.to_string();
                     execution.complete_failed(error.clone(), None, String::new(), String::new());
                     error!(job = %job_name, error = %e, "Job execution error");
-                    (JobStatus::Failed { error }, job.next_run())
+                    let tz = config.settings.effective_timezone();
+                    (JobStatus::Failed { error }, job.next_run(tz).map(|t| t.with_timezone(&Utc)))
                 }
             };
 
@@ -414,8 +421,9 @@ impl Scheduler {
         state.enabled_jobs = 0;
 
         // Add jobs from new config
+        let tz = new_config.settings.effective_timezone();
         for (name, job) in new_config.enabled_jobs() {
-            let next_run = job.next_run();
+            let next_run = job.next_run(tz).map(|t| t.with_timezone(&Utc));
             let mut scheduled_job =
                 ScheduledJob::new(name.clone(), job.schedule.clone(), job.enabled)
                     .with_next_run(next_run);

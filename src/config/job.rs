@@ -185,10 +185,10 @@ impl Job {
     }
 
     /// Get the next scheduled run time
-    pub fn next_run(&self) -> Option<chrono::DateTime<chrono::Utc>> {
+    pub fn next_run<Tz: chrono::TimeZone>(&self, tz: Tz) -> Option<chrono::DateTime<Tz>> {
         self.parse_schedule()
             .ok()
-            .and_then(|schedule| schedule.upcoming(chrono::Utc).next())
+            .and_then(|schedule| schedule.upcoming(tz).next())
     }
 
     /// Get the retry policy

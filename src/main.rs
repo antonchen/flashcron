@@ -8,13 +8,26 @@
 //!   flashcron init                  # Generate default config
 
 use anyhow::{Context, Result};
+use chrono_tz::Tz;
 use clap::{Parser, Subcommand};
 use flashcron::{Config, Scheduler};
 use std::path::PathBuf;
 use std::time::Duration;
 use tracing::{error, info, Level};
 use tracing_subscriber::fmt::format::FmtSpan;
+use tracing_subscriber::fmt::time::FormatTime;
 use tracing_subscriber::EnvFilter;
+
+struct TzTimer {
+    tz: Tz,
+}
+
+impl FormatTime for TzTimer {
+    fn format_time(&self, w: &mut tracing_subscriber::fmt::format::Writer<'_>) -> std::fmt::Result {
+        let now = chrono::Utc::now().with_timezone(&self.tz);
+        write!(w, "{}", now.format("%Y-%m-%d %H:%M:%S%.3f"))
+    }
+}
 
 /// FlashCron - A lightweight, efficient cron daemon
 #[derive(Parser)]
@@ -119,6 +132,13 @@ async fn main() -> Result<()> {
 
 /// Initialize logging
 fn init_logging(cli: &Cli) -> Result<()> {
+    // Try to load config to get timezone, fallback to default settings if not found
+    let tz = if let Ok(config) = Config::from_file(&cli.config) {
+        config.settings.effective_timezone()
+    } else {
+        flashcron::config::Settings::default().effective_timezone()
+    };
+
     let level = cli
         .log_level
         .as_deref()
@@ -133,6 +153,7 @@ fn init_logging(cli: &Cli) -> Result<()> {
     let subscriber = tracing_subscriber::fmt()
         .with_env_filter(filter)
         .with_span_events(FmtSpan::CLOSE)
+        .with_timer(TzTimer { tz })
         .with_target(false);
 
     if cli.json {
@@ -304,6 +325,7 @@ fn validate_config(config_path: PathBuf) -> Result<()> {
 /// List configured jobs
 fn list_jobs(config_path: PathBuf, enabled_only: bool, format: &str) -> Result<()> {
     let config = Config::from_file(&config_path)?;
+    let tz = config.settings.effective_timezone();
 
     let jobs: Vec<_> = if enabled_only {
         config.enabled_jobs().collect()
@@ -322,7 +344,7 @@ fn list_jobs(config_path: PathBuf, enabled_only: bool, format: &str) -> Result<(
                         "command": job.command,
                         "enabled": job.enabled,
                         "description": job.description,
-                        "next_run": job.next_run().map(|t| t.to_rfc3339()),
+                        "next_run": job.next_run(tz).map(|t| t.to_rfc3339()),
                     })
                 })
                 .collect();
@@ -330,15 +352,15 @@ fn list_jobs(config_path: PathBuf, enabled_only: bool, format: &str) -> Result<(
         }
         _ => {
             println!(
-                "{:<20} {:<20} {:<10} NEXT RUN",
-                "NAME", "SCHEDULE", "STATUS"
+                "{:<20} {:<20} {:<10} NEXT RUN ({})",
+                "NAME", "SCHEDULE", "STATUS", tz
             );
             println!("{}", "-".repeat(75));
 
             for (name, job) in jobs {
                 let status = if job.enabled { "enabled" } else { "disabled" };
                 let next_run = job
-                    .next_run()
+                    .next_run(tz)
                     .map(|t| t.format("%Y-%m-%d %H:%M:%S").to_string())
                     .unwrap_or_else(|| "-".to_string());
 
@@ -426,8 +448,9 @@ fn show_status() -> Result<()> {
 /// Show upcoming schedule
 fn show_schedule(config_path: PathBuf, count: usize) -> Result<()> {
     let config = Config::from_file(&config_path)?;
+    let tz = config.settings.effective_timezone();
 
-    println!("Next {} scheduled runs:", count);
+    println!("Next {} scheduled runs (Timezone: {}):", count, tz);
     println!("{:<25} JOB", "TIME");
     println!("{}", "-".repeat(50));
 
@@ -442,7 +465,7 @@ fn show_schedule(config_path: PathBuf, count: usize) -> Result<()> {
                 .flat_map(move |schedule| {
                     let name = name.clone();
                     schedule
-                        .upcoming(chrono::Utc)
+                        .upcoming(tz)
                         .take(count)
                         .map(move |time| (time, name.clone()))
                         .collect::<Vec<_>>()
@@ -455,7 +478,7 @@ fn show_schedule(config_path: PathBuf, count: usize) -> Result<()> {
 
     // Show top N
     for (time, name) in runs.into_iter().take(count) {
-        println!("{:<25} {}", time.format("%Y-%m-%d %H:%M:%S UTC"), name);
+        println!("{:<25} {}", time.format("%Y-%m-%d %H:%M:%S"), name);
     }
 
     Ok(())

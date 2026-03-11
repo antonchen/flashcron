@@ -120,14 +120,68 @@ impl Job {
 
     /// Parse the cron schedule
     pub fn parse_schedule(&self) -> std::result::Result<Schedule, String> {
-        // Add seconds field if not present (cron crate expects 6-7 fields)
-        let expr = if self.schedule.split_whitespace().count() == 5 {
+        let parts: Vec<&str> = self.schedule.split_whitespace().collect();
+
+        let mut expr = if parts.len() == 5 {
             format!("0 {}", self.schedule)
         } else {
             self.schedule.clone()
         };
 
+        // The cron crate requires Day of Week (field 6) to use names (Sun, Mon, etc.) or 1-7 (Sun-Sat)
+        // Some standard crons use 0-6 or 0-7. We normalize 0 and 7 to Sun, and 1-6 to Mon-Sat.
+        let fields: Vec<&str> = expr.split_whitespace().collect();
+        if fields.len() >= 6 {
+            let dow_field = fields[5];
+            let fixed_dow = Self::normalize_dow_field(dow_field);
+
+            // Reconstruct the expression with the fixed DOW field
+            let new_fields_str: Vec<String> = fields
+                .iter()
+                .enumerate()
+                .map(|(i, &f)| {
+                    if i == 5 {
+                        fixed_dow.clone()
+                    } else {
+                        f.to_string()
+                    }
+                })
+                .collect();
+            expr = new_fields_str.join(" ");
+        }
+
         Schedule::from_str(&expr).map_err(|e| e.to_string())
+    }
+
+    fn normalize_dow_field(field: &str) -> String {
+        let parts: Vec<&str> = field.splitn(2, '/').collect();
+        let expr = parts[0];
+
+        let fixed_expr = expr
+            .split(',')
+            .map(|item| {
+                item.split('-')
+                    .map(|val| match val {
+                        "0" | "7" => "Sun",
+                        "1" => "Mon",
+                        "2" => "Tue",
+                        "3" => "Wed",
+                        "4" => "Thu",
+                        "5" => "Fri",
+                        "6" => "Sat",
+                        other => other,
+                    })
+                    .collect::<Vec<_>>()
+                    .join("-")
+            })
+            .collect::<Vec<_>>()
+            .join(",");
+
+        if parts.len() > 1 {
+            format!("{}/{}", fixed_expr, parts[1])
+        } else {
+            fixed_expr
+        }
     }
 
     /// Get the next scheduled run time

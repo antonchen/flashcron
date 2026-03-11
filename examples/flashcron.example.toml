@@ -69,7 +69,7 @@ timeout = 300
 
 # Database maintenance - weekly on Sunday at 3 AM
 [jobs.db_maintenance]
-schedule = "0 3 * * 0"
+schedule = "0 3 * * 7"
 command = "/opt/scripts/db-vacuum.sh"
 description = "Weekly database maintenance"
 enabled = true

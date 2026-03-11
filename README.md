@@ -201,6 +201,7 @@ shell = "/bin/sh"            # Default shell
 watch_config = true          # Hot reload on config changes
 history_size = 1000          # Job execution history size
 shutdown_grace_period = 30   # Seconds to wait on shutdown
+print_output = false         # Whether to print job output to logs
 ```
 
 ### Job Configuration
@@ -219,6 +220,7 @@ retry_count = 3              # Retry on failure
 retry_delay = 60             # Seconds between retries
 max_output_size = 1048576    # Max stdout/stderr capture (bytes)
 run_on_startup = false       # Run immediately on daemon start
+print_output = false         # Override global print_output setting
 ```
 
 ### Cron Expression Format

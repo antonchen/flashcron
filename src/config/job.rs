@@ -68,6 +68,10 @@ pub struct Job {
     /// Tags for filtering/grouping
     #[serde(default)]
     pub tags: Vec<String>,
+
+    /// Whether to print output (overrides global setting)
+    #[serde(default)]
+    pub print_output: Option<bool>,
 }
 
 fn default_enabled() -> bool {
@@ -165,6 +169,7 @@ impl Default for Job {
             max_output_size: 1024 * 1024,
             run_on_startup: false,
             tags: Vec::new(),
+            print_output: None,
         }
     }
 }

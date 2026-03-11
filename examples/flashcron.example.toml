@@ -31,6 +31,10 @@ timezone = "UTC"
 # Grace period (seconds) for graceful shutdown
 shutdown_grace_period = 30
 
+# Whether to print job execution output to the main daemon logs
+# Can be overridden per job
+print_output = false
+
 #==============================================================================
 # Job Definitions
 #==============================================================================
@@ -41,6 +45,7 @@ schedule = "* * * * *"
 command = "echo 'FlashCron is alive!'"
 description = "Simple heartbeat job"
 enabled = true
+print_output = true         # Enable output printing for this job specifically
 
 # Daily backup at 2 AM
 [jobs.daily_backup]

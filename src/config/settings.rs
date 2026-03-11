@@ -58,6 +58,10 @@ pub struct Settings {
     /// Grace period in seconds for shutdown
     #[serde(default = "default_grace_period")]
     pub shutdown_grace_period: u64,
+
+    /// Whether to print command execution output
+    #[serde(default = "default_print_output")]
+    pub print_output: bool,
 }
 
 fn default_log_level() -> String {
@@ -100,6 +104,10 @@ fn default_grace_period() -> u64 {
     30
 }
 
+fn default_print_output() -> bool {
+    false
+}
+
 impl Default for Settings {
     fn default() -> Self {
         Self {
@@ -117,6 +125,7 @@ impl Default for Settings {
             history_size: default_history_size(),
             timezone: default_timezone(),
             shutdown_grace_period: default_grace_period(),
+            print_output: default_print_output(),
         }
     }
 }
@@ -150,6 +159,7 @@ mod tests {
         assert_eq!(settings.log_level, "info");
         assert_eq!(settings.max_concurrent_jobs, 10);
         assert!(settings.watch_config);
+        assert!(!settings.print_output);
     }
 
     #[test]

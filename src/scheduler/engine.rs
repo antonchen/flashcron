@@ -12,7 +12,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::{broadcast, mpsc, RwLock};
 use tokio::time::{self, Duration, Instant};
-use tracing::{debug, error, info, warn};
+use tracing::{debug, error, info, info_span, warn};
 
 /// Wrapper for job triggers in the priority queue (min-heap by time)
 #[derive(Debug, Clone)]
@@ -265,7 +265,11 @@ impl Scheduler {
         let state = Arc::clone(&self.state);
         let event_tx = self.event_tx.clone();
         let semaphore = Arc::clone(&self.job_semaphore);
-        let history_size = self.config.read().await.settings.history_size;
+        
+        let config = self.config.read().await;
+        let history_size = config.settings.history_size;
+        let print_output = job.print_output.unwrap_or(config.settings.print_output);
+        drop(config);
 
         tokio::spawn(async move {
             // Acquire semaphore permit
@@ -303,6 +307,17 @@ impl Scheduler {
             // Process result
             let (status, next_run) = match result {
                 Ok((exit_code, stdout, stderr)) => {
+                    if print_output {
+                        let span = info_span!("output", job_name = %job_name);
+                        let _guard = span.enter();
+                        for line in stdout.lines() {
+                            info!("{}", line);
+                        }
+                        for line in stderr.lines() {
+                            error!("{}", line);
+                        }
+                    }
+
                     if exit_code == 0 {
                         execution.complete_success(exit_code, stdout, stderr);
                         info!(

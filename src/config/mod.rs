@@ -85,6 +85,9 @@ max_concurrent_jobs = 10
 # Default shell for commands
 shell = "/bin/sh"
 
+# Whether to print command execution output to stdout/stderr
+print_output = false
+
 # Enable config file watching for hot reload
 watch_config = true
 
@@ -106,6 +109,7 @@ enabled = true
 timeout = 3600  # 1 hour timeout
 retry_count = 3
 retry_delay = 60
+print_output = false  # Override global setting for this job
 
 [jobs.backup]
 schedule = "0 2 * * 7"  # Every Sunday at 2 AM

@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- `print_output` global and per-job configuration to toggle command output logging using tracing spans.
+
 ## [0.1.0] - 2025-01-XX
 
 ### Added

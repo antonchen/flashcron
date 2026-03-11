@@ -168,18 +168,6 @@ impl Settings {
     pub fn shell_command(&self) -> (&str, &[String]) {
         (&self.shell, &self.shell_args)
     }
-
-    /// Parse log level to tracing Level
-    pub fn tracing_level(&self) -> tracing::Level {
-        match self.log_level.to_lowercase().as_str() {
-            "trace" => tracing::Level::TRACE,
-            "debug" => tracing::Level::DEBUG,
-            "info" => tracing::Level::INFO,
-            "warn" | "warning" => tracing::Level::WARN,
-            "error" => tracing::Level::ERROR,
-            _ => tracing::Level::INFO,
-        }
-    }
 }
 
 #[cfg(test)]
@@ -193,19 +181,5 @@ mod tests {
         assert_eq!(settings.max_concurrent_jobs, 10);
         assert!(settings.watch_config);
         assert!(!settings.print_output);
-    }
-
-    #[test]
-    fn test_tracing_level() {
-        let mut settings = Settings::default();
-
-        settings.log_level = "debug".to_string();
-        assert_eq!(settings.tracing_level(), tracing::Level::DEBUG);
-
-        settings.log_level = "error".to_string();
-        assert_eq!(settings.tracing_level(), tracing::Level::ERROR);
-
-        settings.log_level = "invalid".to_string();
-        assert_eq!(settings.tracing_level(), tracing::Level::INFO);
     }
 }

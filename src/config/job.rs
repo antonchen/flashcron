@@ -2,6 +2,7 @@
 
 use crate::error::{Error, Result};
 use cron::Schedule;
+use log::warn;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -107,10 +108,10 @@ impl Job {
         // Validate working directory exists if specified
         if let Some(ref dir) = self.working_dir {
             if !dir.exists() {
-                tracing::warn!(
-                    "Working directory '{}' for job '{}' does not exist",
-                    dir.display(),
-                    name
+                warn!(
+                    job_name = &*name,
+                    working_dir = &*dir.display().to_string();
+                    "Working directory does not exist"
                 );
             }
         }

@@ -437,7 +437,8 @@ MIT License - see [LICENSE](LICENSE) for details.
 - [cron](https://crates.io/crates/cron) - Cron expression parsing
 - [tokio](https://tokio.rs) - Async runtime
 - [clap](https://clap.rs) - CLI framework
-- [tracing](https://tracing.rs) - Structured logging
+- [log](https://github.com/rust-lang/log) - Logging facade
+- [fern](https://github.com/daboross/fern) - Logging dispatcher
 
 ---
 

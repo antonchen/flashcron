@@ -7,7 +7,7 @@ use std::sync::RwLock;
 use tokio::io::AsyncReadExt;
 use tokio::process::Command;
 use tokio::time::{timeout, Duration};
-use tracing::{debug, instrument, warn};
+use log::{debug, warn};
 
 /// Job executor responsible for running commands
 pub struct JobExecutor {
@@ -33,13 +33,13 @@ impl JobExecutor {
     }
 
     /// Execute a job
-    #[instrument(skip(self, job), fields(job_name = %job_name))]
     pub async fn execute(&self, job_name: &str, job: &Job) -> Result<(i32, String, String)> {
         let (shell, shell_args) = self.get_shell(job);
 
         debug!(
-            command = %job.command,
-            shell = %shell,
+            job_name = job_name,
+            command = &*job.command,
+            shell = &*shell;
             "Executing job"
         );
 
@@ -143,7 +143,7 @@ impl JobExecutor {
                 }
                 Err(_) => {
                     // Timeout - process will be killed due to kill_on_drop
-                    warn!(job = %job_name, timeout = %job.timeout, "Job timed out");
+                    warn!(job_name = job_name, timeout = job.timeout; "Job timed out");
                     Err(Error::job_timeout(job_name, job.timeout))
                 }
             }

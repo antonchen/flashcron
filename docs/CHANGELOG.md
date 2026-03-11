@@ -8,7 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
-- `print_output` global and per-job configuration to toggle command output logging using tracing spans.
+- `print_output` global and per-job configuration to toggle command output logging.
+- Timezone configuration support for global and per-job scheduling, allowing jobs to run in specific local times.
+
+### Changed
+- Migrated logging framework from `tracing` to `log` and `fern` for a more lightweight footprint and better control over formatting.
+- Standardized job execution duration format in logs from `duration_ms=X` to `duration=Xms` for better readability.
 
 ## [0.1.0] - 2025-01-XX
 

@@ -40,7 +40,7 @@ pub enum SchedulerEvent {
         job_name: String,
         execution_id: Uuid,
         success: bool,
-        duration_ms: u64,
+        duration: u64,
     },
     /// Job failed
     JobFailed {

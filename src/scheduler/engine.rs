@@ -12,7 +12,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::{broadcast, mpsc, RwLock};
 use tokio::time::{self, Duration, Instant};
-use tracing::{debug, error, info, info_span, warn};
+use log::{debug, error, info, warn};
 
 /// Wrapper for job triggers in the priority queue (min-heap by time)
 #[derive(Debug, Clone)]
@@ -145,7 +145,7 @@ impl Scheduler {
         drop(config);
 
         for job_name in startup_jobs {
-            info!(job = %job_name, "Running startup job");
+            info!(job_name = &*job_name; "Running startup");
             self.trigger_job(&job_name).await?;
         }
 
@@ -251,7 +251,7 @@ impl Scheduler {
             let state = self.state.read().await;
             if let Some(sj) = state.get_job(&job_name) {
                 if sj.is_running {
-                    debug!(job = %job_name, "Job already running, skipping");
+                    debug!(job_name = &*job_name; "Job already running, skipping");
                     return Ok(());
                 }
             }
@@ -279,7 +279,7 @@ impl Scheduler {
             let _permit = match semaphore.acquire().await {
                 Ok(p) => p,
                 Err(_) => {
-                    error!(job = %job_name, "Failed to acquire job semaphore");
+                    error!(job_name = &*job_name; "Failed to acquire job semaphore");
                     return;
                 }
             };
@@ -300,7 +300,8 @@ impl Scheduler {
                 execution_id,
             });
 
-            info!(job = %job_name, execution_id = %execution_id, "Starting job");
+            let exec_id_str = execution_id.to_string();
+            info!(job_name = &*job_name, execution_id = &*exec_id_str; "Starting");
 
             // Execute the job
             let start = Instant::now();
@@ -311,49 +312,48 @@ impl Scheduler {
             let (status, next_run) = match result {
                 Ok((exit_code, stdout, stderr)) => {
                     if print_output {
-                        let span = info_span!("output", job_name = %job_name);
-                        let _guard = span.enter();
                         for line in stdout.lines() {
-                            info!("{}", line);
+                            info!(job_name = &*job_name, output = line; "");
                         }
                         for line in stderr.lines() {
-                            error!("{}", line);
+                            error!(job_name = &*job_name, output = line; "");
                         }
                     }
 
+                    let duration_str = format!("{}ms", duration.as_millis());
                     if exit_code == 0 {
                         execution.complete_success(exit_code, stdout, stderr);
                         info!(
-                            job = %job_name,
-                            duration_ms = %duration.as_millis(),
+                            job_name = &*job_name,
+                            duration = &*duration_str;
                             "Job completed successfully"
                         );
                         let tz = config.settings.effective_timezone();
                         (JobStatus::Success, job.next_run(tz).map(|t| t.with_timezone(&Utc)))
                     } else {
-                        let error = format!("Exit code: {}", exit_code);
-                        execution.complete_failed(error.clone(), Some(exit_code), stdout, stderr);
+                        let error_msg = format!("Exit code: {}", exit_code);
+                        execution.complete_failed(error_msg.clone(), Some(exit_code), stdout, stderr);
                         warn!(
-                            job = %job_name,
-                            exit_code = %exit_code,
+                            job_name = &*job_name,
+                            exit_code = exit_code;
                             "Job failed"
                         );
                         let tz = config.settings.effective_timezone();
-                        (JobStatus::Failed { error }, job.next_run(tz).map(|t| t.with_timezone(&Utc)))
+                        (JobStatus::Failed { error: error_msg }, job.next_run(tz).map(|t| t.with_timezone(&Utc)))
                     }
                 }
                 Err(Error::JobTimeout { .. }) => {
                     execution.complete_timeout();
-                    warn!(job = %job_name, "Job timed out");
+                    warn!(job_name = &*job_name; "Job timed out");
                     let tz = config.settings.effective_timezone();
                     (JobStatus::Timeout, job.next_run(tz).map(|t| t.with_timezone(&Utc)))
                 }
                 Err(e) => {
-                    let error = e.to_string();
-                    execution.complete_failed(error.clone(), None, String::new(), String::new());
-                    error!(job = %job_name, error = %e, "Job execution error");
+                    let error_msg = e.to_string();
+                    execution.complete_failed(error_msg.clone(), None, String::new(), String::new());
+                    error!(job_name = &*job_name, error = &*error_msg; "Job execution error");
                     let tz = config.settings.effective_timezone();
-                    (JobStatus::Failed { error }, job.next_run(tz).map(|t| t.with_timezone(&Utc)))
+                    (JobStatus::Failed { error: error_msg }, job.next_run(tz).map(|t| t.with_timezone(&Utc)))
                 }
             };
 
@@ -370,7 +370,7 @@ impl Scheduler {
                 job_name,
                 execution_id,
                 success,
-                duration_ms: duration.as_millis() as u64,
+                duration: duration.as_millis() as u64,
             });
         });
 
@@ -386,7 +386,7 @@ impl Scheduler {
             .clone();
         drop(config);
 
-        info!(job = %job_name, "Manually triggering job");
+        info!(job_name = job_name; "Manually triggering");
         self.spawn_job_execution(job_name.to_string(), job).await
     }
 
@@ -448,7 +448,7 @@ impl Scheduler {
 
         *self.config.write().await = new_config;
 
-        info!("Configuration reloaded: {} enabled jobs", job_count);
+        info!(job_count = job_count as u64; "Configuration reloaded");
         let _ = self
             .event_tx
             .send(SchedulerEvent::ConfigReloaded { job_count });
@@ -461,12 +461,14 @@ impl Scheduler {
         match msg {
             SchedulerMessage::TriggerJob { job_name } => {
                 if let Err(e) = self.trigger_job(&job_name).await {
-                    warn!(job = %job_name, error = %e, "Failed to trigger job");
+                    let err_str = e.to_string();
+                    warn!(job_name = &*job_name, error = &*err_str; "Failed to trigger");
                 }
             }
             SchedulerMessage::ReloadConfig => {
                 if let Err(e) = self.reload_config().await {
-                    error!(error = %e, "Failed to reload configuration");
+                    let err_str = e.to_string();
+                    error!(error = &*err_str; "Failed to reload configuration");
                 }
             }
             SchedulerMessage::GetStatus { response_tx } => {
@@ -476,7 +478,7 @@ impl Scheduler {
             }
             SchedulerMessage::StopJob { job_name } => {
                 // TODO: Implement job cancellation
-                warn!(job = %job_name, "Job cancellation not yet implemented");
+                warn!(job_name = &*job_name; "Cancellation not yet implemented");
             }
             SchedulerMessage::Shutdown => {
                 info!("Shutdown requested");

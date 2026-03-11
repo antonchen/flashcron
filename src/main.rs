@@ -11,6 +11,7 @@ use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use flashcron::{Config, Scheduler};
 use std::path::PathBuf;
+use std::time::Duration;
 use tracing::{error, info, Level};
 use tracing_subscriber::fmt::format::FmtSpan;
 use tracing_subscriber::EnvFilter;
@@ -94,7 +95,7 @@ async fn main() -> Result<()> {
     // Initialize logging
     init_logging(&cli)?;
 
-    match cli.command {
+    let result = match cli.command {
         Commands::Run { foreground: _ } => run_daemon(cli.config).await,
         Commands::Validate => validate_config(cli.config),
         Commands::List { enabled, format } => list_jobs(cli.config, enabled, &format),
@@ -102,7 +103,18 @@ async fn main() -> Result<()> {
         Commands::Init { output, force } => init_config(output, force),
         Commands::Status => show_status(),
         Commands::Schedule { count } => show_schedule(cli.config, count),
+    };
+
+    if let Err(e) = result {
+        error!("Error: {}", e);
+        // Allow time for logs to be flushed
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        std::process::exit(1);
     }
+
+    // Explicitly exit to ensure all background threads are terminated
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    std::process::exit(0);
 }
 
 /// Initialize logging
@@ -149,27 +161,38 @@ async fn run_daemon(config_path: PathBuf) -> Result<()> {
     // Create scheduler
     let (scheduler, handle) = Scheduler::new(config, config_path.clone());
 
-    // Setup signal handlers
-    let shutdown_handle = handle.clone();
-    tokio::spawn(async move {
-        if let Err(e) = wait_for_shutdown_signal().await {
-            error!("Signal handler error: {}", e);
-        }
-        info!("Shutdown signal received");
-        let _ = shutdown_handle.shutdown().await;
-    });
-
     // Setup config file watcher
     let reload_handle = handle.clone();
     let watch_path = config_path.clone();
-    tokio::spawn(async move {
+    let watcher_task = tokio::spawn(async move {
         if let Err(e) = watch_config_file(watch_path, reload_handle).await {
             error!("Config watcher error: {}", e);
         }
     });
 
-    // Run scheduler
-    scheduler.run().await?;
+    // Run scheduler and wait for shutdown signal concurrently
+    let scheduler_handle = handle.clone();
+    tokio::select! {
+        res = scheduler.run() => {
+            if let Err(e) = res {
+                error!("Scheduler error: {}", e);
+            }
+        }
+        sig_res = wait_for_shutdown_signal() => {
+            if let Err(e) = sig_res {
+                error!("Signal handler error: {}", e);
+            }
+            info!("Shutting down gracefully...");
+            let _ = scheduler_handle.shutdown().await;
+            
+            // Give the scheduler a moment to exit the loop gracefully
+            // If it doesn't exit quickly, the select! will end and we'll abort tasks anyway
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+    }
+
+    // Abort background tasks
+    watcher_task.abort();
 
     info!("FlashCron stopped");
     Ok(())
@@ -185,9 +208,9 @@ async fn wait_for_shutdown_signal() -> Result<()> {
         let mut sighup = signal(SignalKind::hangup())?;
 
         tokio::select! {
-            _ = sigterm.recv() => info!("Received SIGTERM"),
-            _ = sigint.recv() => info!("Received SIGINT"),
-            _ = sighup.recv() => info!("Received SIGHUP"),
+            res = sigterm.recv() => { if res.is_none() { return Ok(()); } info!("Received SIGTERM"); },
+            res = sigint.recv() => { if res.is_none() { return Ok(()); } info!("Received SIGINT"); },
+            res = sighup.recv() => { if res.is_none() { return Ok(()); } info!("Received SIGHUP"); },
         }
     }
 
@@ -223,7 +246,8 @@ async fn watch_config_file(
     info!("Watching config file {:?} for changes", path);
 
     loop {
-        match rx.recv() {
+        // Use try_recv to avoid blocking the tokio worker thread
+        match rx.try_recv() {
             Ok(Ok(event)) => {
                 if event.kind.is_modify() || event.kind.is_create() {
                     info!("Config file changed, reloading...");
@@ -236,8 +260,11 @@ async fn watch_config_file(
             Ok(Err(e)) => {
                 error!("Watch error: {:?}", e);
             }
-            Err(e) => {
-                error!("Channel error: {:?}", e);
+            Err(mpsc::TryRecvError::Empty) => {
+                // Yield to tokio and wait a bit before checking again
+                tokio::time::sleep(Duration::from_millis(500)).await;
+            }
+            Err(mpsc::TryRecvError::Disconnected) => {
                 break;
             }
         }

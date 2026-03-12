@@ -6,13 +6,13 @@ use crate::executor::JobExecutor;
 use crate::scheduler::state::{ScheduledJob, SchedulerState};
 use crate::scheduler::{JobTrigger, SchedulerEvent, SchedulerMessage};
 use chrono::Utc;
+use log::{debug, error, info, warn};
 use std::cmp::Ordering;
 use std::collections::BinaryHeap;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::{broadcast, mpsc, RwLock};
 use tokio::time::{self, Duration, Instant};
-use log::{debug, error, info, warn};
 
 /// Wrapper for job triggers in the priority queue (min-heap by time)
 #[derive(Debug, Clone)]
@@ -152,6 +152,11 @@ impl Scheduler {
         Ok(())
     }
 
+    /// Get the scheduler state reference
+    pub fn get_state(&self) -> Arc<RwLock<SchedulerState>> {
+        self.state.clone()
+    }
+
     /// Main scheduler loop
     pub async fn run(mut self) -> Result<()> {
         self.initialize().await?;
@@ -267,10 +272,13 @@ impl Scheduler {
         let state = Arc::clone(&self.state);
         let event_tx = self.event_tx.clone();
         let semaphore = Arc::clone(&self.job_semaphore);
-        
+
         let config_lock = self.config.read().await;
         let config = config_lock.clone();
-        let history_size = config.settings.history_size;
+        #[cfg(feature = "web")]
+        let job_history_size = config.settings.job_history_size;
+        #[cfg(feature = "web")]
+        let max_history_size = config.settings.max_history_size;
         let print_output = job.print_output.unwrap_or(config.settings.print_output);
         drop(config_lock);
 
@@ -329,31 +337,53 @@ impl Scheduler {
                             "Job completed successfully"
                         );
                         let tz = config.settings.effective_timezone();
-                        (JobStatus::Success, job.next_run(tz).map(|t| t.with_timezone(&Utc)))
+                        (
+                            JobStatus::Success,
+                            job.next_run(tz).map(|t| t.with_timezone(&Utc)),
+                        )
                     } else {
                         let error_msg = format!("Exit code: {}", exit_code);
-                        execution.complete_failed(error_msg.clone(), Some(exit_code), stdout, stderr);
+                        execution.complete_failed(
+                            error_msg.clone(),
+                            Some(exit_code),
+                            stdout,
+                            stderr,
+                        );
                         warn!(
                             job_name = &*job_name,
                             exit_code = exit_code;
                             "Job failed"
                         );
                         let tz = config.settings.effective_timezone();
-                        (JobStatus::Failed { error: error_msg }, job.next_run(tz).map(|t| t.with_timezone(&Utc)))
+                        (
+                            JobStatus::Failed { error: error_msg },
+                            job.next_run(tz).map(|t| t.with_timezone(&Utc)),
+                        )
                     }
                 }
                 Err(Error::JobTimeout { .. }) => {
                     execution.complete_timeout();
                     warn!(job_name = &*job_name; "Job timed out");
                     let tz = config.settings.effective_timezone();
-                    (JobStatus::Timeout, job.next_run(tz).map(|t| t.with_timezone(&Utc)))
+                    (
+                        JobStatus::Timeout,
+                        job.next_run(tz).map(|t| t.with_timezone(&Utc)),
+                    )
                 }
                 Err(e) => {
                     let error_msg = e.to_string();
-                    execution.complete_failed(error_msg.clone(), None, String::new(), String::new());
+                    execution.complete_failed(
+                        error_msg.clone(),
+                        None,
+                        String::new(),
+                        String::new(),
+                    );
                     error!(job_name = &*job_name, error = &*error_msg; "Job execution error");
                     let tz = config.settings.effective_timezone();
-                    (JobStatus::Failed { error: error_msg }, job.next_run(tz).map(|t| t.with_timezone(&Utc)))
+                    (
+                        JobStatus::Failed { error: error_msg },
+                        job.next_run(tz).map(|t| t.with_timezone(&Utc)),
+                    )
                 }
             };
 
@@ -362,7 +392,16 @@ impl Scheduler {
             // Update state
             {
                 let mut s = state.write().await;
-                s.record_job_completion(&job_name, status, execution, next_run, history_size);
+                s.record_job_completion(
+                    &job_name,
+                    status,
+                    execution,
+                    next_run,
+                    #[cfg(feature = "web")]
+                    job_history_size,
+                    #[cfg(feature = "web")]
+                    max_history_size,
+                );
             }
 
             // Emit completion event
@@ -407,13 +446,8 @@ impl Scheduler {
 
         let mut state = self.state.write().await;
 
-        // Keep track of running jobs
-        let running_jobs: Vec<_> = state
-            .jobs
-            .iter()
-            .filter(|(_, j)| j.is_running)
-            .map(|(n, j)| (n.clone(), j.current_execution_id))
-            .collect();
+        // Keep track of previous job states
+        let old_jobs = state.jobs.clone();
 
         // Reset job info
         state.jobs.clear();
@@ -428,10 +462,14 @@ impl Scheduler {
                 ScheduledJob::new(name.clone(), job.schedule.clone(), job.enabled)
                     .with_next_run(next_run);
 
-            // Preserve running state
-            if let Some((_, exec_id)) = running_jobs.iter().find(|(n, _)| n == name) {
-                scheduled_job.is_running = true;
-                scheduled_job.current_execution_id = *exec_id;
+            // Preserve previous state
+            if let Some(old_job) = old_jobs.get(name) {
+                scheduled_job.is_running = old_job.is_running;
+                scheduled_job.current_execution_id = old_job.current_execution_id;
+                scheduled_job.last_run = old_job.last_run;
+                scheduled_job.last_status = old_job.last_status.clone();
+                scheduled_job.run_count = old_job.run_count;
+                scheduled_job.failure_count = old_job.failure_count;
             }
 
             state.add_job(scheduled_job);

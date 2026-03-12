@@ -51,6 +51,9 @@ notify = "6.1"
 
 # UUID for job IDs
 uuid = { version = "1.6", features = ["v4", "serde"] }
+axum = { version = "0.8", optional = true }
+tower-http = { version = "0.6", features = ["cors", "trace"], optional = true }
+reqwest = { version = "0.13", features = ["json"], optional = true }
 
 [target.'cfg(unix)'.dependencies]
 nix = { version = "0.27", features = ["signal", "process"] }
@@ -66,8 +69,9 @@ assert_cmd = "2.0"
 predicates = "3.0"
 
 [features]
-default = []
+default = ["web"]
 metrics = ["dep:metrics", "dep:metrics-exporter-prometheus"]
+web = ["dep:axum", "dep:tower-http", "dep:reqwest"]
 
 [[bin]]
 name = "flashcron"

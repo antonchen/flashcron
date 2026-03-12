@@ -10,9 +10,9 @@
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use flashcron::{Config, Scheduler};
+use log::{error, info, LevelFilter};
 use std::path::PathBuf;
 use std::time::Duration;
-use log::{error, info, LevelFilter};
 
 /// FlashCron - A lightweight, efficient cron daemon
 #[derive(Parser)]
@@ -84,6 +84,21 @@ enum Commands {
         #[arg(short = 'n', long, default_value = "10")]
         count: usize,
     },
+
+    /// Show job execution history
+    #[cfg(feature = "web")]
+    History {
+        /// Job name to filter by
+        job_name: Option<String>,
+
+        /// Limit number of records
+        #[arg(short, long, default_value = "20")]
+        limit: usize,
+
+        /// Query specific execution by ID
+        #[arg(long)]
+        id: Option<String>,
+    },
 }
 
 #[tokio::main]
@@ -101,6 +116,12 @@ async fn main() -> Result<()> {
         Commands::Init { output, force } => init_config(output, force),
         Commands::Status => show_status(),
         Commands::Schedule { count } => show_schedule(cli.config, count),
+        #[cfg(feature = "web")]
+        Commands::History {
+            job_name,
+            limit,
+            id,
+        } => show_history(job_name, limit, id).await,
     };
 
     if let Err(e) = result {
@@ -125,7 +146,7 @@ fn init_logging(cli: &Cli) -> Result<()> {
     };
 
     let tz = settings.effective_timezone();
-    
+
     // Priority: CLI > Config
     let log_level = cli.log_level.as_ref().unwrap_or(&settings.log_level);
     let use_json = cli.json || settings.json_logs;
@@ -148,18 +169,32 @@ fn init_logging(cli: &Cli) -> Result<()> {
         base_config = base_config.chain(
             fern::Dispatch::new()
                 .format(move |out, message, record| {
-                    let timestamp = chrono::Utc::now().with_timezone(&tz).format("%Y-%m-%d %H:%M:%S%.3f").to_string();
-                    
+                    let timestamp = chrono::Utc::now()
+                        .with_timezone(&tz)
+                        .format("%Y-%m-%d %H:%M:%S%.3f")
+                        .to_string();
+
                     // Extract KV pairs from the record
                     let mut kv_map = serde_json::Map::new();
-                    
+
                     // A simple visitor to collect KVs
                     struct JsonVisitor<'a>(&'a mut serde_json::Map<String, serde_json::Value>);
                     impl<'kvs> log::kv::Visitor<'kvs> for JsonVisitor<'_> {
-                        fn visit_pair(&mut self, key: log::kv::Key<'kvs>, value: log::kv::Value<'kvs>) -> std::result::Result<(), log::kv::Error> {
+                        fn visit_pair(
+                            &mut self,
+                            key: log::kv::Key<'kvs>,
+                            value: log::kv::Value<'kvs>,
+                        ) -> std::result::Result<(), log::kv::Error> {
                             let key_str = key.to_string();
-                            let final_key = if key_str == "job_name" { "job" } else { &key_str };
-                            self.0.insert(final_key.to_string(), serde_json::Value::String(value.to_string()));
+                            let final_key = if key_str == "job_name" {
+                                "job"
+                            } else {
+                                &key_str
+                            };
+                            self.0.insert(
+                                final_key.to_string(),
+                                serde_json::Value::String(value.to_string()),
+                            );
                             Ok(())
                         }
                     }
@@ -167,11 +202,17 @@ fn init_logging(cli: &Cli) -> Result<()> {
 
                     // Construct the final JSON object with timestamp FIRST
                     let mut json_obj = serde_json::Map::new();
-                    json_obj.insert("timestamp".to_string(), serde_json::Value::String(timestamp));
-                    json_obj.insert("level".to_string(), serde_json::Value::String(record.level().to_string()));
-                    
+                    json_obj.insert(
+                        "timestamp".to_string(),
+                        serde_json::Value::String(timestamp),
+                    );
+                    json_obj.insert(
+                        "level".to_string(),
+                        serde_json::Value::String(record.level().to_string()),
+                    );
+
                     let msg_str = message.to_string();
-                    
+
                     if kv_map.is_empty() {
                         // Standard message, no fields nesting
                         json_obj.insert("message".to_string(), serde_json::Value::String(msg_str));
@@ -182,26 +223,37 @@ fn init_logging(cli: &Cli) -> Result<()> {
                             message_content.insert(k, v);
                         }
                         if !msg_str.is_empty() {
-                            message_content.insert("message".to_string(), serde_json::Value::String(msg_str));
+                            message_content
+                                .insert("message".to_string(), serde_json::Value::String(msg_str));
                         }
-                        json_obj.insert("message".to_string(), serde_json::Value::Object(message_content));
+                        json_obj.insert(
+                            "message".to_string(),
+                            serde_json::Value::Object(message_content),
+                        );
                     }
 
                     out.finish(format_args!("{}", serde_json::Value::Object(json_obj)));
                 })
-                .chain(std::io::stdout())
+                .chain(std::io::stdout()),
         );
     } else {
         base_config = base_config.chain(
             fern::Dispatch::new()
                 .format(move |out, message, record| {
-                    let timestamp = chrono::Utc::now().with_timezone(&tz).format("%Y-%m-%d %H:%M:%S%.3f").to_string();
-                    
+                    let timestamp = chrono::Utc::now()
+                        .with_timezone(&tz)
+                        .format("%Y-%m-%d %H:%M:%S%.3f")
+                        .to_string();
+
                     // Extract KV pairs
                     let mut kvs = Vec::new();
                     struct TextVisitor<'a>(&'a mut Vec<(String, String)>);
                     impl<'kvs> log::kv::Visitor<'kvs> for TextVisitor<'_> {
-                        fn visit_pair(&mut self, key: log::kv::Key<'kvs>, value: log::kv::Value<'kvs>) -> std::result::Result<(), log::kv::Error> {
+                        fn visit_pair(
+                            &mut self,
+                            key: log::kv::Key<'kvs>,
+                            value: log::kv::Value<'kvs>,
+                        ) -> std::result::Result<(), log::kv::Error> {
                             self.0.push((key.to_string(), value.to_string()));
                             Ok(())
                         }
@@ -221,7 +273,9 @@ fn init_logging(cli: &Cli) -> Result<()> {
                         } else if k == "status" {
                             status = Some(v);
                         } else {
-                            if !kv_str.is_empty() { kv_str.push(' '); }
+                            if !kv_str.is_empty() {
+                                kv_str.push(' ');
+                            }
                             kv_str.push_str(&format!("{}={}", k, v));
                         }
                     }
@@ -247,7 +301,9 @@ fn init_logging(cli: &Cli) -> Result<()> {
 
                     let mut final_with_kv = final_msg;
                     if !kv_str.is_empty() {
-                        if !final_with_kv.is_empty() { final_with_kv.push(' '); }
+                        if !final_with_kv.is_empty() {
+                            final_with_kv.push(' ');
+                        }
                         final_with_kv.push_str(&kv_str);
                     }
 
@@ -258,11 +314,13 @@ fn init_logging(cli: &Cli) -> Result<()> {
                         final_with_kv
                     ))
                 })
-                .chain(std::io::stdout())
+                .chain(std::io::stdout()),
         );
     }
 
-    base_config.apply().map_err(|e| anyhow::anyhow!("Failed to initialize logging: {}", e))?;
+    base_config
+        .apply()
+        .map_err(|e| anyhow::anyhow!("Failed to initialize logging: {}", e))?;
 
     Ok(())
 }
@@ -282,7 +340,25 @@ async fn run_daemon(config_path: PathBuf) -> Result<()> {
     );
 
     // Create scheduler
+    #[cfg(feature = "web")]
+    let api_host = config.settings.api_host.clone();
+    #[cfg(feature = "web")]
+    let api_port = config.settings.api_port;
+
     let (scheduler, handle) = Scheduler::new(config, config_path.clone());
+
+    #[cfg(feature = "web")]
+    let api_task = {
+        let api_state = flashcron::api::ApiState {
+            scheduler_state: scheduler.get_state(),
+            handle: handle.clone(),
+        };
+        tokio::spawn(async move {
+            if let Err(e) = flashcron::api::start_api_server(api_state, &api_host, api_port).await {
+                error!("API server error: {}", e);
+            }
+        })
+    };
 
     // Setup config file watcher
     let reload_handle = handle.clone();
@@ -307,7 +383,7 @@ async fn run_daemon(config_path: PathBuf) -> Result<()> {
             }
             info!("Shutting down gracefully...");
             let _ = scheduler_handle.shutdown().await;
-            
+
             // Give the scheduler a moment to exit the loop gracefully
             // If it doesn't exit quickly, the select! will end and we'll abort tasks anyway
             tokio::time::sleep(Duration::from_millis(100)).await;
@@ -316,6 +392,9 @@ async fn run_daemon(config_path: PathBuf) -> Result<()> {
 
     // Abort background tasks
     watcher_task.abort();
+
+    #[cfg(feature = "web")]
+    api_task.abort();
 
     info!("FlashCron stopped");
     Ok(())
@@ -583,5 +662,98 @@ fn show_schedule(config_path: PathBuf, count: usize) -> Result<()> {
         println!("{:<25} {}", time.format("%Y-%m-%d %H:%M:%S"), name);
     }
 
+    Ok(())
+}
+#[cfg(feature = "web")]
+async fn show_history(job_name: Option<String>, limit: usize, id: Option<String>) -> Result<()> {
+    let client = reqwest::Client::new();
+    let base_url = "http://127.0.0.1:8080";
+
+    if let Some(exec_id) = id {
+        let url = format!("{}/api/history/{}", base_url, exec_id);
+        let resp = client.get(&url).send().await?;
+
+        if resp.status().is_success() {
+            let exec: flashcron::config::JobExecution = resp.json().await?;
+            println!("Job: {}", exec.job_name);
+            println!("ID: {}", exec.id);
+            let status_str = match exec.status {
+                flashcron::config::JobStatus::Success => "Success".to_string(),
+                flashcron::config::JobStatus::Failed { ref error } => format!("Failed: {}", error),
+                flashcron::config::JobStatus::Timeout => "Timeout".to_string(),
+                _ => "Unknown".to_string(),
+            };
+            println!("Status: {}", status_str);
+            println!("Start Time: {}", exec.started_at);
+            if let Some(end) = exec.ended_at {
+                println!("End Time: {}", end);
+                let ms = (end - exec.started_at).num_milliseconds();
+                if ms < 1000 {
+                    println!("Duration: {}ms", ms);
+                } else {
+                    println!("Duration: {:.2}s", ms as f64 / 1000.0);
+                }
+            }
+
+            println!("\n--- STDOUT ---");
+            match exec.stdout {
+                Some(out) if !out.trim().is_empty() => println!("{}", out.trim()),
+                _ => println!("(No output)"),
+            }
+
+            match exec.stderr {
+                Some(err) if !err.trim().is_empty() => {
+                    println!("\n--- STDERR / ERROR ---");
+                    println!("{}", err.trim());
+                }
+                _ => {}
+            }
+        } else {
+            println!("Execution ID {} not found.", exec_id);
+        }
+    } else {
+        let mut url = format!("{}/api/history?limit={}", base_url, limit);
+        if let Some(name) = job_name {
+            url.push_str(&format!("&job_name={}", name));
+        }
+
+        let resp = client.get(&url).send().await?;
+        if resp.status().is_success() {
+            #[derive(serde::Deserialize)]
+            struct HistoryResp {
+                history: Vec<flashcron::config::JobExecution>,
+            }
+            let data: HistoryResp = resp.json().await?;
+
+            if data.history.is_empty() {
+                println!("No history found.");
+                return Ok(());
+            }
+
+            println!(
+                "{:<36} | {:<20} | {:<10} | {:<25}",
+                "Execution ID", "Job Name", "Status", "Start Time"
+            );
+            println!("{:-<36}-+-{:-<20}-+-{:-<10}-+-{:-<25}", "", "", "", "");
+
+            for exec in data.history {
+                let status_str = match exec.status {
+                    flashcron::config::JobStatus::Success => "Success",
+                    flashcron::config::JobStatus::Failed { .. } => "Failed",
+                    flashcron::config::JobStatus::Timeout => "Timeout",
+                    _ => "Unknown",
+                };
+                println!(
+                    "{:<36} | {:<20} | {:<10} | {}",
+                    exec.id,
+                    exec.job_name.chars().take(20).collect::<String>(),
+                    status_str,
+                    exec.started_at.format("%Y-%m-%d %H:%M:%S")
+                );
+            }
+        } else {
+            println!("Failed to retrieve history: {}", resp.status());
+        }
+    }
     Ok(())
 }

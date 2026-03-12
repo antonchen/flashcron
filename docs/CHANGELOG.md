@@ -8,10 +8,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Built-in HTTP Web Dashboard and API to monitor job status and execution history (enabled by default via `web` feature).
+- Configuration options `api_host` and `api_port` to customize the Web API and Dashboard server listener (defaults to `127.0.0.1:8080`).
 - `print_output` global and per-job configuration to toggle command output logging.
 - Timezone configuration support for global and per-job scheduling, allowing jobs to run in specific local times.
 
 ### Changed
+- Replaced global `history_size` configuration with `job_history_size` (default: 100) and `max_history_size` (default: 10000) to allow per-job history limits while preventing overall memory exhaustion.
 - Migrated logging framework from `tracing` to `log` and `fern` for a more lightweight footprint and better control over formatting.
 - Standardized job execution duration format in logs from `duration_ms=X` to `duration=Xms` for better readability.
 

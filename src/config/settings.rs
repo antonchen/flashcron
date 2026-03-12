@@ -49,9 +49,25 @@ pub struct Settings {
     #[serde(default)]
     pub metrics_addr: Option<String>,
 
-    /// History size (number of job executions to keep)
-    #[serde(default = "default_history_size")]
-    pub history_size: usize,
+    /// Max history entries to keep per job
+    #[cfg(feature = "web")]
+    #[serde(default = "default_job_history_size")]
+    pub job_history_size: usize,
+
+    /// Max total history entries to keep globally
+    #[cfg(feature = "web")]
+    #[serde(default = "default_max_history_size")]
+    pub max_history_size: usize,
+
+    /// API Server host
+    #[cfg(feature = "web")]
+    #[serde(default = "default_api_host")]
+    pub api_host: String,
+
+    /// API Server port
+    #[cfg(feature = "web")]
+    #[serde(default = "default_api_port")]
+    pub api_port: u16,
 
     /// Timezone for cron expressions (default: UTC)
     #[serde(default = "default_timezone")]
@@ -94,8 +110,24 @@ fn default_watch_config() -> bool {
     true
 }
 
-fn default_history_size() -> usize {
-    1000
+#[cfg(feature = "web")]
+fn default_job_history_size() -> usize {
+    100
+}
+
+#[cfg(feature = "web")]
+fn default_max_history_size() -> usize {
+    10000
+}
+
+#[cfg(feature = "web")]
+fn default_api_host() -> String {
+    "127.0.0.1".to_string()
+}
+
+#[cfg(feature = "web")]
+fn default_api_port() -> u16 {
+    8080
 }
 
 fn default_timezone() -> String {
@@ -124,7 +156,14 @@ impl Default for Settings {
             pid_file: None,
             #[cfg(feature = "metrics")]
             metrics_addr: None,
-            history_size: default_history_size(),
+            #[cfg(feature = "web")]
+            job_history_size: default_job_history_size(),
+            #[cfg(feature = "web")]
+            max_history_size: default_max_history_size(),
+            #[cfg(feature = "web")]
+            api_host: default_api_host(),
+            #[cfg(feature = "web")]
+            api_port: default_api_port(),
             timezone: default_timezone(),
             shutdown_grace_period: default_grace_period(),
             print_output: default_print_output(),

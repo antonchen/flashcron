@@ -14,6 +14,14 @@ json_logs = false
 # Maximum number of jobs that can run simultaneously (0 = unlimited)
 max_concurrent_jobs = 10
 
+# Web Dashboard / API server host
+# Default: "127.0.0.1"
+api_host = "127.0.0.1"
+
+# Web Dashboard / API server port
+# Default: 8080
+api_port = 8080
+
 # Default shell for executing commands
 # Linux/macOS: "/bin/sh", "/bin/bash"
 # Windows: "cmd", "powershell"
@@ -22,8 +30,11 @@ shell = "/bin/sh"
 # Automatically reload config when file changes
 watch_config = true
 
-# Number of job executions to keep in history
-history_size = 1000
+# Max history entries to keep per job
+job_history_size = 100
+
+# Max total history entries to keep globally
+max_history_size = 10000
 
 # Timezone for cron expressions and log display
 # Priority: TZ environment variable > this setting > system timezone > UTC

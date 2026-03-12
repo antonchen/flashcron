@@ -10,6 +10,8 @@
 //! - **Reliable**: Graceful shutdown, job timeout handling, automatic retry
 //! - **Cross-platform**: Linux, macOS, Windows support
 
+#[cfg(feature = "web")]
+pub mod api;
 pub mod config;
 pub mod error;
 pub mod executor;

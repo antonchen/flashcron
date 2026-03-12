@@ -56,6 +56,7 @@ Traditional cron daemons get the job done, but they weren't built for speed. **F
 - **Concurrent Limits**: Prevent resource exhaustion
 
 ### Observability
+- **Web Dashboard**: Built-in HTTP interface to monitor job status and history
 - **Structured Logging**: Human-readable or JSON format
 - **Execution History**: Track job success/failure rates
 - **Prometheus Metrics**: Optional metrics endpoint (feature flag)
@@ -220,10 +221,13 @@ The `list` and `schedule` commands will also display times in the effective time
 [settings]
 log_level = "info"           # trace, debug, info, warn, error
 json_logs = false            # JSON format for log aggregators
+api_host = "127.0.0.1"       # Web Dashboard / API host
+api_port = 8080              # Web Dashboard / API port
 max_concurrent_jobs = 10     # 0 = unlimited
 shell = "/bin/sh"            # Default shell
 watch_config = true          # Hot reload on config changes
-history_size = 1000          # Job execution history size
+job_history_size = 100         # Max history entries to keep per job
+max_history_size = 10000       # Max total history entries to keep globally
 timezone = "System"          # Timezone (e.g., "System", "UTC", "Asia/Shanghai")
 shutdown_grace_period = 30   # Seconds to wait on shutdown
 print_output = false         # Whether to print job output to logs
@@ -439,6 +443,9 @@ MIT License - see [LICENSE](LICENSE) for details.
 - [clap](https://clap.rs) - CLI framework
 - [log](https://github.com/rust-lang/log) - Logging facade
 - [fern](https://github.com/daboross/fern) - Logging dispatcher
+- [axum](https://github.com/tokio-rs/axum) - Web framework
+- [tower-http](https://github.com/tower-rs/tower-http) - HTTP middleware
+- [tailwind-css](https://tailwindcss.com) - UI styling (via CDN)
 
 ---
 

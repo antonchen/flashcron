@@ -2,12 +2,12 @@
 
 use crate::config::Job;
 use crate::error::{Error, Result};
+use log::{debug, warn};
 use std::process::Stdio;
 use std::sync::RwLock;
 use tokio::io::AsyncReadExt;
 use tokio::process::Command;
 use tokio::time::{timeout, Duration};
-use log::{debug, warn};
 
 /// Job executor responsible for running commands
 pub struct JobExecutor {

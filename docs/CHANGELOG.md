@@ -7,9 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-03-12
+
 ### Added
+- Auto-resolution for configuration files: subcommands like `list`, `schedule`, and `history` will automatically detect and use the configuration file from a running `flashcron run` instance, or from the `FLASHCRON_CONFIG` environment variable, eliminating the need to repeatedly pass `-c`.
 - Built-in HTTP Web Dashboard and API to monitor job status and execution history (enabled by default via `web` feature).
-- Configuration options `api_host` and `api_port` to customize the Web API and Dashboard server listener (defaults to `127.0.0.1:8080`).
+- Configuration options `api_host` and `api_port` to customize the Web API and Dashboard server listener (defaults to `0.0.0.0:8080`).
 - `print_output` global and per-job configuration to toggle command output logging.
 - Timezone configuration support for global and per-job scheduling, allowing jobs to run in specific local times.
 
@@ -54,5 +57,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Aggressive release optimizations (LTO, strip)
 - Tiny binary size (~3 MB stripped)
 
-[Unreleased]: https://github.com/alfredo-baratta/flashcron/compare/v0.1.0...HEAD
-[0.1.0]: https://github.com/alfredo-baratta/flashcron/releases/tag/v0.1.0
+[Unreleased]: https://github.com/antonchen/flashcron/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/antonchen/flashcron/compare/v0.1.0...v0.2.0
+[0.1.0]: https://github.com/antonchen/flashcron/releases/tag/v0.1.0

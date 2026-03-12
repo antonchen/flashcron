@@ -15,8 +15,8 @@ json_logs = false
 max_concurrent_jobs = 10
 
 # Web Dashboard / API server host
-# Default: "127.0.0.1"
-api_host = "127.0.0.1"
+# Default: "0.0.0.0"
+api_host = "0.0.0.0"
 
 # Web Dashboard / API server port
 # Default: 8080
@@ -30,15 +30,14 @@ shell = "/bin/sh"
 # Automatically reload config when file changes
 watch_config = true
 
-# Max history entries to keep per job
+# Max history entries to keep per job. Stored in RAM.
 job_history_size = 100
 
-# Max total history entries to keep globally
+# Max total history entries to keep globally. Warning: affects RAM usage.
 max_history_size = 10000
 
-# Timezone for cron expressions and log display
-# Priority: TZ environment variable > this setting > system timezone > UTC
-# Supported formats: "System", "UTC", "Asia/Shanghai", "America/New_York", etc.
+# Timezone for scheduling. Priority: TZ env > this setting > system > UTC
+# Formats: "System", "UTC", "Asia/Shanghai", "America/New_York", etc.
 timezone = "System"
 
 # Grace period (seconds) for graceful shutdown
@@ -132,26 +131,3 @@ schedule = "0 0 * * *"
 command = "echo 'This job is disabled'"
 description = "Old task - kept for reference"
 enabled = false
-
-#==============================================================================
-# Advanced Examples
-#==============================================================================
-
-# High-frequency job with limited output capture
-[jobs.metrics_collect]
-schedule = "* * * * *"
-command = "/opt/bin/collect-metrics"
-description = "Collect system metrics every minute"
-enabled = true
-timeout = 55
-capture_output = false      # Don't capture output for performance
-
-# Job with environment-specific config
-[jobs.deploy_staging]
-schedule = "0 0 * * *"
-command = "/opt/deploy/deploy.sh"
-description = "Deploy to staging environment"
-enabled = true
-environment = { ENV = "staging", DRY_RUN = "false" }
-working_dir = "/opt/deploy"
-tags = ["deploy", "staging"]

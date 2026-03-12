@@ -57,7 +57,7 @@ fn bench_next_run(c: &mut Criterion) {
     let job = config.get_job("test").unwrap();
 
     c.bench_function("next_run_calculation", |b| {
-        b.iter(|| black_box(job.next_run()));
+        b.iter(|| black_box(job.next_run(chrono::Utc)));
     });
 }
 
@@ -69,7 +69,10 @@ fn generate_config(job_count: usize) -> Config {
 
 /// Generate config string with N jobs
 fn generate_config_string(job_count: usize) -> String {
-    let mut config = String::from("[settings]\nmax_concurrent_jobs = 100\n\n");
+    let mut config = format!(
+        "[settings]\nmax_concurrent_jobs = {}\n\n",
+        flashcron::config::DEFAULT_MAX_CONCURRENT_JOBS
+    );
 
     for i in 0..job_count {
         config.push_str(&format!(

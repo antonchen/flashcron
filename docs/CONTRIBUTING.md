@@ -10,7 +10,7 @@ Be respectful, inclusive, and constructive. We're all here to build something gr
 
 ### Reporting Bugs
 
-1. Check if the bug has already been reported in [Issues](https://github.com/alfredo-baratta/flashcron/issues)
+1. Check if the bug has already been reported in [Issues](https://github.com/antonchen/flashcron/issues)
 2. If not, create a new issue with:
    - Clear, descriptive title
    - Steps to reproduce
@@ -49,7 +49,7 @@ Be respectful, inclusive, and constructive. We're all here to build something gr
 
 ```bash
 # Clone the repository
-git clone https://github.com/alfredo-baratta/flashcron
+git clone https://github.com/antonchen/flashcron
 cd flashcron
 
 # Build debug version

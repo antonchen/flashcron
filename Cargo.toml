@@ -1,13 +1,13 @@
 [package]
 name = "flashcron"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
-rust-version = "1.82"
-authors = ["Alfredo Baratta <alfredobaratta@outlook.com>"]
+rust-version = "1.85.0"
+authors = ["Alfredo Baratta <alfredobaratta@outlook.com>", "Anton Chen <contact@antonchen.com>"]
 description = "A lightning-fast, ultra-efficient cron daemon written in Rust - Schedule tasks at the speed of light"
 license = "MIT"
-repository = "https://github.com/alfredo-baratta/flashcron"
-homepage = "https://github.com/alfredo-baratta/flashcron"
+repository = "https://github.com/antonchen/flashcron"
+homepage = "https://github.com/antonchen/flashcron"
 documentation = "https://docs.rs/flashcron"
 keywords = ["cron", "scheduler", "daemon", "async", "performance"]
 categories = ["command-line-utilities", "development-tools"]
@@ -42,10 +42,6 @@ anyhow = "1.0"
 # Process management
 nix = { version = "0.27", features = ["signal", "process"], optional = true }
 
-# Metrics (optional)
-metrics = { version = "0.21", optional = true }
-metrics-exporter-prometheus = { version = "0.12", optional = true }
-
 # Notify for config reload
 notify = "6.1"
 
@@ -70,7 +66,6 @@ predicates = "3.0"
 
 [features]
 default = ["web"]
-metrics = ["dep:metrics", "dep:metrics-exporter-prometheus"]
 web = ["dep:axum", "dep:tower-http", "dep:reqwest"]
 
 [[bin]]

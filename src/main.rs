@@ -20,19 +20,21 @@ use crate::cmd::args::{Cli, Commands};
 async fn main() -> Result<()> {
     let cli = Cli::parse();
 
+    let config_path = cmd::state::resolve_config_path(cli.config.clone());
+
     // Initialize logging
-    cmd::logging::init_logging(&cli)?;
+    cmd::logging::init_logging(&cli, &config_path)?;
 
     let result = match cli.command {
-        Commands::Run { foreground: _ } => cmd::commands::run_daemon(cli.config).await,
-        Commands::Validate => cmd::commands::validate_config(cli.config),
+        Commands::Run { foreground: _ } => cmd::commands::run_daemon(config_path).await,
+        Commands::Validate => cmd::commands::validate_config(config_path),
         Commands::List { enabled, format } => {
-            cmd::commands::list_jobs(cli.config, enabled, &format)
+            cmd::commands::list_jobs(config_path, enabled, &format)
         }
-        Commands::Trigger { job_name } => cmd::commands::trigger_job(cli.config, &job_name).await,
+        Commands::Trigger { job_name } => cmd::commands::trigger_job(config_path, &job_name).await,
         Commands::Init { output, force } => cmd::commands::init_config(output, force),
         Commands::Status => cmd::commands::show_status(),
-        Commands::Schedule { count } => cmd::commands::show_schedule(cli.config, count),
+        Commands::Schedule { count } => cmd::commands::show_schedule(config_path, count),
         #[cfg(feature = "web")]
         Commands::History {
             job_name,

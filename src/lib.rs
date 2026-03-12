@@ -6,7 +6,7 @@
 //!
 //! - **Efficient**: Minimal memory footprint (~2-5MB), fast startup
 //! - **Simple**: TOML configuration, intuitive CLI
-//! - **Observable**: Built-in logging, optional Prometheus metrics
+//! - **Observable**: Built-in logging and Web API/Dashboard
 //! - **Reliable**: Graceful shutdown, job timeout handling, automatic retry
 //! - **Cross-platform**: Linux, macOS, Windows support
 

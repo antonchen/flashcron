@@ -4,7 +4,7 @@ mod job;
 mod settings;
 
 pub use job::{Job, JobExecution, JobStatus, RetryPolicy};
-pub use settings::Settings;
+pub use settings::*;
 
 use crate::error::{Error, Result};
 use serde::{Deserialize, Serialize};
@@ -48,6 +48,17 @@ impl Config {
 
     /// Validate the configuration
     pub fn validate(&self) -> Result<()> {
+        #[cfg(feature = "web")]
+        {
+            if self.settings.job_history_size > self.settings.max_history_size {
+                log::warn!(
+                    "job_history_size ({}) is greater than max_history_size ({}). Individual job history will be limited by the global maximum.",
+                    self.settings.job_history_size,
+                    self.settings.max_history_size
+                );
+            }
+        }
+
         for (name, job) in &self.jobs {
             job.validate(name)?;
         }
@@ -66,38 +77,41 @@ impl Config {
 
     /// Create default configuration
     pub fn default_config() -> String {
-        r#"# FlashCron Configuration File
-# Documentation: https://github.com/yourusername/flashcron
+        format!(
+            r#"# FlashCron Configuration File
+# Documentation: https://github.com/antonchen/flashcron
 
 [settings]
 # Working directory for all jobs (default: current directory)
 # working_dir = "/var/flashcron"
 
 # Log level: trace, debug, info, warn, error
-log_level = "info"
+log_level = "{log_level}"
 
 # Enable JSON logging format
 json_logs = false
 
 # Maximum concurrent jobs (0 = unlimited)
-max_concurrent_jobs = 10
+max_concurrent_jobs = {max_concurrent}
 
 # Default shell for commands
-shell = "/bin/sh"
+shell = "{shell}"
 
 # Whether to print command execution output to stdout/stderr
-print_output = false
+print_output = {print_output}
 
 # Enable config file watching for hot reload
-watch_config = true
+watch_config = {watch_config}
 
-# Timezone for job scheduling and display
-# Priority: TZ env variable > config > system timezone > UTC
+# Max history entries to keep per job. Stored in RAM.
+job_history_size = {job_history}
+
+# Max total history entries to keep globally. Warning: affects RAM usage.
+max_history_size = {max_history}
+
+# Timezone for job scheduling. Priority: TZ env > config > system > UTC
 # Examples: "System", "UTC", "Asia/Shanghai", "America/New_York"
-timezone = "System"
-
-# Prometheus metrics endpoint (requires 'metrics' feature)
-# metrics_addr = "127.0.0.1:9090"
+timezone = "{timezone}"
 
 # Example job definitions
 [jobs.hello]
@@ -121,9 +135,17 @@ schedule = "0 2 * * 7"  # Every Sunday at 2 AM
 command = "echo 'Backup starting...'"
 description = "Weekly backup"
 enabled = true
-environment = { BACKUP_TYPE = "full", COMPRESS = "true" }
-"#
-        .to_string()
+environment = {{ BACKUP_TYPE = "full", COMPRESS = "true" }}
+"#,
+            log_level = settings::DEFAULT_LOG_LEVEL,
+            max_concurrent = settings::DEFAULT_MAX_CONCURRENT_JOBS,
+            shell = if cfg!(windows) { "cmd" } else { "/bin/sh" },
+            print_output = settings::DEFAULT_PRINT_OUTPUT,
+            watch_config = settings::DEFAULT_WATCH_CONFIG,
+            job_history = settings::DEFAULT_JOB_HISTORY_SIZE,
+            max_history = settings::DEFAULT_MAX_HISTORY_SIZE,
+            timezone = settings::DEFAULT_TIMEZONE,
+        )
     }
 }
 

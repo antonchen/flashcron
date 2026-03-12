@@ -112,7 +112,9 @@ impl Scheduler {
         let mut state = self.state.write().await;
 
         for (name, job) in config_lock.enabled_jobs() {
-            let next_run = job.next_run(tz).map(|t| t.with_timezone(&Utc));
+            let next_run = job
+                .next_run(tz)
+                .map(|t: chrono::DateTime<chrono_tz::Tz>| t.with_timezone(&Utc));
             let scheduled_job = ScheduledJob::new(name.clone(), job.schedule.clone(), job.enabled)
                 .with_next_run(next_run);
 
@@ -267,7 +269,10 @@ impl Scheduler {
 
         // Schedule next occurrence
         let tz = self.config.read().await.settings.effective_timezone();
-        if let Some(next) = job.next_run(tz).map(|t| t.with_timezone(&Utc)) {
+        if let Some(next) = job
+            .next_run(tz)
+            .map(|t: chrono::DateTime<chrono_tz::Tz>| t.with_timezone(&Utc))
+        {
             // Make sure we don't schedule the same time again
             if next > trigger.scheduled_at {
                 self.trigger_queue.push(TimedTrigger {
@@ -370,7 +375,8 @@ impl Scheduler {
                         let tz = config.settings.effective_timezone();
                         (
                             JobStatus::Success,
-                            job.next_run(tz).map(|t| t.with_timezone(&Utc)),
+                            job.next_run(tz)
+                                .map(|t: chrono::DateTime<chrono_tz::Tz>| t.with_timezone(&Utc)),
                         )
                     } else {
                         let error_msg = format!("Exit code: {}", exit_code);
@@ -388,7 +394,8 @@ impl Scheduler {
                         let tz = config.settings.effective_timezone();
                         (
                             JobStatus::Failed { error: error_msg },
-                            job.next_run(tz).map(|t| t.with_timezone(&Utc)),
+                            job.next_run(tz)
+                                .map(|t: chrono::DateTime<chrono_tz::Tz>| t.with_timezone(&Utc)),
                         )
                     }
                 }
@@ -398,7 +405,8 @@ impl Scheduler {
                     let tz = config.settings.effective_timezone();
                     (
                         JobStatus::Timeout,
-                        job.next_run(tz).map(|t| t.with_timezone(&Utc)),
+                        job.next_run(tz)
+                            .map(|t: chrono::DateTime<chrono_tz::Tz>| t.with_timezone(&Utc)),
                     )
                 }
                 Err(e) => {
@@ -413,7 +421,8 @@ impl Scheduler {
                     let tz = config.settings.effective_timezone();
                     (
                         JobStatus::Failed { error: error_msg },
-                        job.next_run(tz).map(|t| t.with_timezone(&Utc)),
+                        job.next_run(tz)
+                            .map(|t: chrono::DateTime<chrono_tz::Tz>| t.with_timezone(&Utc)),
                     )
                 }
             };
@@ -488,7 +497,9 @@ impl Scheduler {
         // Add jobs from new config
         let tz = new_config.settings.effective_timezone();
         for (name, job) in new_config.enabled_jobs() {
-            let next_run = job.next_run(tz).map(|t| t.with_timezone(&Utc));
+            let next_run = job
+                .next_run(tz)
+                .map(|t: chrono::DateTime<chrono_tz::Tz>| t.with_timezone(&Utc));
             let mut scheduled_job =
                 ScheduledJob::new(name.clone(), job.schedule.clone(), job.enabled)
                     .with_next_run(next_run);

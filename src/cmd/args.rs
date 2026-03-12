@@ -7,8 +7,8 @@ use std::path::PathBuf;
 #[command(author, version, about, long_about = None)]
 pub struct Cli {
     /// Configuration file path
-    #[arg(short, long, default_value = "flashcron.toml", global = true)]
-    pub config: PathBuf,
+    #[arg(short, long, env = "FLASHCRON_CONFIG", global = true)]
+    pub config: Option<PathBuf>,
 
     /// Log level (trace, debug, info, warn, error)
     #[arg(short, long, global = true)]

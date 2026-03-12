@@ -1,53 +1,62 @@
-//! Global settings configuration
-
 use chrono_tz::Tz;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::str::FromStr;
 
-/// Global settings for the daemon
+//==============================================================================
+// Constants for Default Values (Single Source of Truth)
+//==============================================================================
+pub const DEFAULT_LOG_LEVEL: &str = "info";
+pub const DEFAULT_MAX_CONCURRENT_JOBS: usize = 10;
+pub const DEFAULT_WATCH_CONFIG: bool = true;
+pub const DEFAULT_SHUTDOWN_TIMEOUT: u64 = 30;
+pub const DEFAULT_PRINT_OUTPUT: bool = false;
+pub const DEFAULT_TIMEZONE: &str = "System";
+
+#[cfg(feature = "web")]
+pub const DEFAULT_JOB_HISTORY_SIZE: usize = 100;
+#[cfg(feature = "web")]
+pub const DEFAULT_MAX_HISTORY_SIZE: usize = 10000;
+#[cfg(feature = "web")]
+pub const DEFAULT_API_HOST: &str = "0.0.0.0";
+#[cfg(feature = "web")]
+pub const DEFAULT_API_PORT: u16 = 8080;
+
+/// Global settings for FlashCron
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Settings {
     /// Working directory for all jobs
-    #[serde(default)]
     pub working_dir: Option<PathBuf>,
 
     /// Log level (trace, debug, info, warn, error)
     #[serde(default = "default_log_level")]
     pub log_level: String,
 
-    /// Enable JSON logging format
+    /// Whether to log in JSON format
     #[serde(default)]
     pub json_logs: bool,
 
-    /// Log file path (if not set, logs to stdout)
-    #[serde(default)]
+    /// Log file path
     pub log_file: Option<PathBuf>,
 
-    /// Maximum concurrent jobs
+    /// Maximum number of jobs that can run simultaneously
     #[serde(default = "default_max_concurrent")]
     pub max_concurrent_jobs: usize,
 
-    /// Default shell for commands
+    /// Default shell for executing commands
     #[serde(default = "default_shell")]
     pub shell: String,
 
-    /// Shell arguments (e.g., ["-c"] for sh)
+    /// Arguments for the shell
     #[serde(default = "default_shell_args")]
     pub shell_args: Vec<String>,
 
-    /// Watch config file for changes
+    /// Whether to watch the config file for changes
     #[serde(default = "default_watch_config")]
     pub watch_config: bool,
 
-    /// PID file path
-    #[serde(default)]
+    /// Path to PID file
     pub pid_file: Option<PathBuf>,
-
-    /// Prometheus metrics endpoint address
-    #[cfg(feature = "metrics")]
-    #[serde(default)]
-    pub metrics_addr: Option<String>,
 
     /// Max history entries to keep per job
     #[cfg(feature = "web")]
@@ -82,15 +91,19 @@ pub struct Settings {
     pub print_output: bool,
 }
 
-fn default_log_level() -> String {
-    "info".to_string()
+//==============================================================================
+// Default Value Functions (invoked by serde)
+//==============================================================================
+
+pub fn default_log_level() -> String {
+    DEFAULT_LOG_LEVEL.to_string()
 }
 
-fn default_max_concurrent() -> usize {
-    10
+pub fn default_max_concurrent() -> usize {
+    DEFAULT_MAX_CONCURRENT_JOBS
 }
 
-fn default_shell() -> String {
+pub fn default_shell() -> String {
     if cfg!(windows) {
         "cmd".to_string()
     } else {
@@ -98,7 +111,7 @@ fn default_shell() -> String {
     }
 }
 
-fn default_shell_args() -> Vec<String> {
+pub fn default_shell_args() -> Vec<String> {
     if cfg!(windows) {
         vec!["/C".to_string()]
     } else {
@@ -106,40 +119,40 @@ fn default_shell_args() -> Vec<String> {
     }
 }
 
-fn default_watch_config() -> bool {
-    true
+pub fn default_watch_config() -> bool {
+    DEFAULT_WATCH_CONFIG
 }
 
 #[cfg(feature = "web")]
-fn default_job_history_size() -> usize {
-    100
+pub fn default_job_history_size() -> usize {
+    DEFAULT_JOB_HISTORY_SIZE
 }
 
 #[cfg(feature = "web")]
-fn default_max_history_size() -> usize {
-    10000
+pub fn default_max_history_size() -> usize {
+    DEFAULT_MAX_HISTORY_SIZE
 }
 
 #[cfg(feature = "web")]
-fn default_api_host() -> String {
-    "127.0.0.1".to_string()
+pub fn default_api_host() -> String {
+    DEFAULT_API_HOST.to_string()
 }
 
 #[cfg(feature = "web")]
-fn default_api_port() -> u16 {
-    8080
+pub fn default_api_port() -> u16 {
+    DEFAULT_API_PORT
 }
 
-fn default_timezone() -> String {
-    "System".to_string()
+pub fn default_timezone() -> String {
+    DEFAULT_TIMEZONE.to_string()
 }
 
-fn default_shutdown_timeout() -> u64 {
-    30
+pub fn default_shutdown_timeout() -> u64 {
+    DEFAULT_SHUTDOWN_TIMEOUT
 }
 
-fn default_print_output() -> bool {
-    false
+pub fn default_print_output() -> bool {
+    DEFAULT_PRINT_OUTPUT
 }
 
 impl Default for Settings {
@@ -154,8 +167,6 @@ impl Default for Settings {
             shell_args: default_shell_args(),
             watch_config: default_watch_config(),
             pid_file: None,
-            #[cfg(feature = "metrics")]
-            metrics_addr: None,
             #[cfg(feature = "web")]
             job_history_size: default_job_history_size(),
             #[cfg(feature = "web")]
@@ -186,7 +197,7 @@ impl Settings {
         }
 
         // 2. Configured timezone (if not the default "System")
-        if self.timezone != "System" {
+        if self.timezone != DEFAULT_TIMEZONE {
             if let Ok(tz) = Tz::from_str(&self.timezone) {
                 return tz;
             }
@@ -216,9 +227,11 @@ mod tests {
     #[test]
     fn test_default_settings() {
         let settings = Settings::default();
-        assert_eq!(settings.log_level, "info");
-        assert_eq!(settings.max_concurrent_jobs, 10);
-        assert!(settings.watch_config);
-        assert!(!settings.print_output);
+        assert_eq!(settings.log_level, DEFAULT_LOG_LEVEL);
+        assert_eq!(settings.max_concurrent_jobs, DEFAULT_MAX_CONCURRENT_JOBS);
+        assert_eq!(settings.watch_config, DEFAULT_WATCH_CONFIG);
+        assert_eq!(settings.print_output, DEFAULT_PRINT_OUTPUT);
+        #[cfg(feature = "web")]
+        assert_eq!(settings.api_host, "0.0.0.0");
     }
 }

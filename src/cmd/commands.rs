@@ -11,6 +11,8 @@ pub async fn run_daemon(config_path: PathBuf) -> Result<()> {
     let config = Config::from_file(&config_path)
         .with_context(|| format!("Failed to load config from {:?}", config_path))?;
 
+    crate::cmd::state::save_state(&config_path);
+
     info!(
         "Loaded {} jobs ({} enabled)",
         config.jobs.len(),
@@ -67,6 +69,8 @@ pub async fn run_daemon(config_path: PathBuf) -> Result<()> {
 
     #[cfg(feature = "web")]
     api_task.abort();
+
+    crate::cmd::state::clear_state();
 
     info!("FlashCron stopped");
     Ok(())
@@ -154,6 +158,18 @@ pub fn validate_config(config_path: PathBuf) -> Result<()> {
     match Config::from_file(&config_path) {
         Ok(config) => {
             println!("✓ Configuration is valid");
+
+            #[cfg(feature = "web")]
+            {
+                if config.settings.job_history_size > config.settings.max_history_size {
+                    println!(
+                        "! Warning: job_history_size ({}) is greater than max_history_size ({})",
+                        config.settings.job_history_size, config.settings.max_history_size
+                    );
+                    println!("  Individual job history will be limited by the global maximum.");
+                }
+            }
+
             println!(
                 "  Jobs: {} total, {} enabled",
                 config.jobs.len(),

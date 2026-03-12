@@ -258,7 +258,7 @@ fn test_next_run_calculation() {
     let config = Config::from_str(config_str, "test.toml").unwrap();
     let job = config.get_job("every_minute").unwrap();
 
-    let next = job.next_run();
+    let next = job.next_run(chrono::Utc);
     assert!(next.is_some());
 
     // Should be within the next minute

@@ -186,7 +186,7 @@ impl SchedulerState {
         #[cfg(feature = "web")]
         {
             self.recent_history.push_front(execution);
-            
+
             // Apply job_history_size limit
             let mut job_count = 0;
             let mut i = 0;

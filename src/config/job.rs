@@ -403,7 +403,7 @@ mod tests {
             ..Default::default()
         };
 
-        let next = job.next_run();
+        let next = job.next_run(chrono::Utc);
         assert!(next.is_some());
     }
 

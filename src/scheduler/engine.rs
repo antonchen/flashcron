@@ -192,6 +192,37 @@ impl Scheduler {
             }
         }
 
+        let shutdown_timeout = self.config.read().await.settings.shutdown_timeout;
+
+        info!(
+            "Scheduler stopping, waiting up to {}s for jobs to finish...",
+            shutdown_timeout
+        );
+
+        // Wait for running jobs to finish, up to the timeout
+        let state = self.state.clone();
+        let timeout_duration = Duration::from_secs(shutdown_timeout);
+
+        let wait_result = tokio::time::timeout(timeout_duration, async move {
+            loop {
+                let count = state.read().await.running_jobs;
+                if count == 0 {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(100)).await;
+            }
+        })
+        .await;
+
+        if wait_result.is_err() {
+            log::warn!(
+                "Graceful shutdown timed out ({}s). Forcing exit...",
+                shutdown_timeout
+            );
+        } else {
+            info!("All jobs finished, shutting down completely.");
+        }
+
         info!("Scheduler stopped");
         let _ = self.event_tx.send(SchedulerEvent::Stopped);
 

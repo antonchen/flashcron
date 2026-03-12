@@ -74,7 +74,7 @@ async fn get_history(
     let history: Vec<_> = s
         .recent_history
         .iter()
-        .filter(|exec| job_name.map_or(true, |name| exec.job_name == *name))
+        .filter(|exec| job_name.is_none_or(|name| exec.job_name == *name))
         .take(limit)
         .cloned()
         .collect();

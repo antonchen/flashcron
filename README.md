@@ -229,7 +229,7 @@ watch_config = true          # Hot reload on config changes
 job_history_size = 100         # Max history entries to keep per job
 max_history_size = 10000       # Max total history entries to keep globally
 timezone = "System"          # Timezone (e.g., "System", "UTC", "Asia/Shanghai")
-shutdown_grace_period = 30   # Seconds to wait on shutdown
+shutdown_timeout = 30   # Seconds to wait on shutdown
 print_output = false         # Whether to print job output to logs
 ```
 

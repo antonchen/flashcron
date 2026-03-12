@@ -74,8 +74,8 @@ pub struct Settings {
     pub timezone: String,
 
     /// Grace period in seconds for shutdown
-    #[serde(default = "default_grace_period")]
-    pub shutdown_grace_period: u64,
+    #[serde(default = "default_shutdown_timeout")]
+    pub shutdown_timeout: u64,
 
     /// Whether to print command execution output
     #[serde(default = "default_print_output")]
@@ -134,7 +134,7 @@ fn default_timezone() -> String {
     "System".to_string()
 }
 
-fn default_grace_period() -> u64 {
+fn default_shutdown_timeout() -> u64 {
     30
 }
 
@@ -165,7 +165,7 @@ impl Default for Settings {
             #[cfg(feature = "web")]
             api_port: default_api_port(),
             timezone: default_timezone(),
-            shutdown_grace_period: default_grace_period(),
+            shutdown_timeout: default_shutdown_timeout(),
             print_output: default_print_output(),
         }
     }

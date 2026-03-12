@@ -46,6 +46,9 @@ impl JobExecutor {
         // Build command
         let mut cmd = Command::new(&shell);
 
+        #[cfg(unix)]
+        cmd.process_group(0);
+
         for arg in &shell_args {
             cmd.arg(arg);
         }

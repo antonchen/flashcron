@@ -109,7 +109,7 @@ impl Job {
         if let Some(ref dir) = self.working_dir {
             if !dir.exists() {
                 warn!(
-                    job_name = &*name,
+                    job_name = name,
                     working_dir = &*dir.display().to_string();
                     "Working directory does not exist"
                 );

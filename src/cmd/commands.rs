@@ -2,7 +2,6 @@ use anyhow::{Context, Result};
 use flashcron::{Config, Scheduler};
 use log::{error, info};
 use std::path::PathBuf;
-use std::time::Duration;
 
 /// Run the daemon
 pub async fn run_daemon(config_path: PathBuf) -> Result<()> {
@@ -48,25 +47,19 @@ pub async fn run_daemon(config_path: PathBuf) -> Result<()> {
         }
     });
 
-    // Run scheduler and wait for shutdown signal concurrently
-    let scheduler_handle = handle.clone();
-    tokio::select! {
-        res = scheduler.run() => {
-            if let Err(e) = res {
-                error!("Scheduler error: {}", e);
-            }
+    // Wait for shutdown signal in a separate task
+    let scheduler_handle_for_sig = handle.clone();
+    tokio::spawn(async move {
+        if let Err(e) = wait_for_shutdown_signal().await {
+            error!("Signal handler error: {}", e);
         }
-        sig_res = wait_for_shutdown_signal() => {
-            if let Err(e) = sig_res {
-                error!("Signal handler error: {}", e);
-            }
-            info!("Shutting down gracefully...");
-            let _ = scheduler_handle.shutdown().await;
+        info!("Shutting down gracefully...");
+        let _ = scheduler_handle_for_sig.shutdown().await;
+    });
 
-            // Give the scheduler a moment to exit the loop gracefully
-            // If it doesn't exit quickly, the select! will end and we'll abort tasks anyway
-            tokio::time::sleep(Duration::from_millis(100)).await;
-        }
+    // Run scheduler to completion
+    if let Err(e) = scheduler.run().await {
+        error!("Scheduler error: {}", e);
     }
 
     // Abort background tasks

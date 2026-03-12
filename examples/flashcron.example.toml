@@ -42,7 +42,7 @@ max_history_size = 10000
 timezone = "System"
 
 # Grace period (seconds) for graceful shutdown
-shutdown_grace_period = 30
+shutdown_timeout = 30
 
 # Whether to print job execution output to the main daemon logs
 # Can be overridden per job

@@ -16,7 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - Replaced global `history_size` configuration with `job_history_size` (default: 100) and `max_history_size` (default: 10000) to allow per-job history limits while preventing overall memory exhaustion.
 - Migrated logging framework from `tracing` to `log` and `fern` for a more lightweight footprint and better control over formatting.
-- Standardized job execution duration format in logs from `duration_ms=X` to `duration=Xms` for better readability.
+- Renamed `shutdown_grace_period` to `shutdown_timeout` to clarify its function, and fixed the issue where the shutdown signal would cause immediate aborts without respecting this timeout value.
 
 ## [0.1.0] - 2025-01-XX
 

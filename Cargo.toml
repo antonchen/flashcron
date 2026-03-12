@@ -22,7 +22,7 @@ clap = { version = "4.4", features = ["derive", "env"] }
 
 # Configuration
 serde = { version = "1.0", features = ["derive"] }
-toml = "0.8"
+toml = "1.0"
 
 # Logging
 log = { version = "0.4", features = ["kv", "serde", "kv_unstable"] }
@@ -30,20 +30,20 @@ fern = "0.7"
 serde_json = { version = "1.0", features = ["preserve_order"] }
 
 # Cron parsing
-cron = "0.12"
+cron = "0.15"
 chrono = { version = "0.4", features = ["serde"] }
 chrono-tz = "0.10"
 iana-time-zone = "0.1"
 
 # Error handling
-thiserror = "1.0"
+thiserror = "2.0"
 anyhow = "1.0"
 
 # Process management
-nix = { version = "0.27", features = ["signal", "process"], optional = true }
+nix = { version = "0.31", features = ["signal", "process"], optional = true }
 
 # Notify for config reload
-notify = "6.1"
+notify = "8.2"
 
 # UUID for job IDs
 uuid = { version = "1.6", features = ["v4", "serde"] }
@@ -52,10 +52,10 @@ tower-http = { version = "0.6", features = ["cors", "trace"], optional = true }
 reqwest = { version = "0.13", features = ["json"], optional = true }
 
 [target.'cfg(unix)'.dependencies]
-nix = { version = "0.27", features = ["signal", "process"] }
+nix = { version = "0.31", features = ["signal", "process"] }
 
 [target.'cfg(windows)'.dependencies]
-windows = { version = "0.52", features = ["Win32_System_Threading", "Win32_Foundation"] }
+windows = { version = "0.62", features = ["Win32_System_Threading", "Win32_Foundation"] }
 
 [dev-dependencies]
 criterion = { version = "0.5", features = ["async_tokio"] }

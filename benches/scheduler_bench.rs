@@ -16,7 +16,8 @@ fn bench_scheduler_init(c: &mut Criterion) {
                 let config = generate_config(count);
                 b.iter(|| {
                     let config = config.clone();
-                    let (scheduler, _handle) = Scheduler::new(config, PathBuf::from("bench.toml"));
+                    let (scheduler, _handle) =
+                        Scheduler::new(config, PathBuf::from("bench.toml"), None);
                     black_box(scheduler)
                 });
             },

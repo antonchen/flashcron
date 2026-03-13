@@ -8,7 +8,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- SQLite-based persistence layer: task history and success/failure statistics are now stored in a database, ensuring data is preserved across container/process restarts.
+- New configuration option `sql_file` to specify the database file path.
+- Background maintenance task that runs every 24 hours to enforce history size limits and clean up orphaned data.
 - Manual job triggers, dashboard tab filtering, and secure `api_token` authentication.
+
+### Changed
+- Refactored Web Dashboard to query task history directly from SQLite, significantly reducing heap memory consumption by removing the in-memory history buffer.
+- Enhanced global statistics on the dashboard: replaced Success Rate with persistent "Successes" and "Failures" metrics.
 
 ## [0.2.0] - 2026-03-12
 

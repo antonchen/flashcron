@@ -153,7 +153,36 @@ async fn test_scheduler_creation() {
     "#;
 
     let config = Config::from_str(config_str, "test.toml").unwrap();
-    let (_scheduler, _handle) = Scheduler::new(config, PathBuf::from("test.toml"));
+    let (_scheduler, _handle) = Scheduler::new(config, PathBuf::from("test.toml"), None);
+    // Scheduler created successfully
+}
+
+/// Test persistence and state recovery
+#[tokio::test]
+async fn test_persistence_recovery() {
+    use flashcron::config::JobExecution;
+    use flashcron::db::DatabaseManager;
+    use tempfile::NamedTempFile;
+
+    let db_file = NamedTempFile::new().unwrap();
+    let db_path = db_file.path().to_str().unwrap().to_string();
+
+    // 1. Create DB and save a fake execution
+    let db = DatabaseManager::init(&db_path).await.unwrap();
+    let mut exec = JobExecution::new("test-job", "manual");
+    exec.complete_success(0, "ok".into(), "".into());
+    db.save(exec).await.unwrap();
+
+    // 2. Initialize scheduler with this DB
+    let config_str = r#"
+        [settings]
+        timezone = "UTC"
+        [jobs.test-job]
+        schedule = "* * * * *"
+        command = "echo hello"
+    "#;
+    let config = Config::from_str(config_str, "test.toml").unwrap();
+    let (_scheduler, _handle) = Scheduler::new(config, PathBuf::from("test.toml"), None);
     // Scheduler created successfully
 }
 

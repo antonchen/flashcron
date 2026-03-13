@@ -16,6 +16,7 @@ RUN cargo build --release
 
 # Runtime stage
 FROM debian:stable-slim
+ENV DEBIAN_FRONTEND=noninteractive
 ENV MALLOC_ARENA_MAX=2
 ENV LANG=en_US.UTF-8
 ENV LC_ALL=en_US.UTF-8

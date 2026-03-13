@@ -4,8 +4,6 @@ use crate::config::{JobExecution, JobStatus};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-#[cfg(feature = "web")]
-use std::collections::VecDeque;
 use uuid::Uuid;
 
 /// Information about a scheduled job
@@ -96,9 +94,6 @@ pub struct SchedulerState {
     pub total_failures: u64,
     /// Job information
     pub jobs: HashMap<String, ScheduledJob>,
-    /// Recent execution history
-    #[cfg(feature = "web")]
-    pub recent_history: VecDeque<JobExecution>,
 }
 
 impl SchedulerState {
@@ -115,8 +110,6 @@ impl SchedulerState {
             total_executions: 0,
             total_failures: 0,
             jobs: HashMap::new(),
-            #[cfg(feature = "web")]
-            recent_history: VecDeque::new(),
         }
     }
 
@@ -160,8 +153,6 @@ impl SchedulerState {
         status: JobStatus,
         #[allow(unused_variables)] execution: JobExecution,
         next_run: Option<DateTime<Utc>>,
-        #[cfg(feature = "web")] job_history_size: usize,
-        #[cfg(feature = "web")] max_history_size: usize,
     ) {
         if let Some(job) = self.jobs.get_mut(job_name) {
             let was_failure = matches!(status, JobStatus::Failed { .. } | JobStatus::Timeout);
@@ -174,31 +165,6 @@ impl SchedulerState {
             self.total_executions += 1;
             if was_failure {
                 self.total_failures += 1;
-            }
-        }
-
-        // Add to history
-        #[cfg(feature = "web")]
-        {
-            self.recent_history.push_front(execution);
-
-            // Apply job_history_size limit
-            let mut job_count = 0;
-            let mut i = 0;
-            while i < self.recent_history.len() {
-                if self.recent_history[i].job_name == job_name {
-                    job_count += 1;
-                    if job_count > job_history_size {
-                        self.recent_history.remove(i);
-                        continue;
-                    }
-                }
-                i += 1;
-            }
-
-            // Apply max_history_size limit
-            while self.recent_history.len() > max_history_size {
-                self.recent_history.pop_back();
             }
         }
     }

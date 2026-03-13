@@ -45,5 +45,6 @@ logs/
 simulation.toml
 test_config.toml
 run_tests.sh
+flashcron.db
 *.bat
 GEMINI.md

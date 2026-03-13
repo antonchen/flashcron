@@ -17,10 +17,10 @@
 ## Fork 新功能
 本版本是基于 **v0.1.0** 的增强分支，新增了以下核心特性：
 
-- **内置 Web 控制台**：轻量级监控界面，可实时追踪任务状态、成功率及执行历史（包含 RESTful API）。
-- **时区支持**：原生支持时区（如 `Asia/Shanghai`）
-- **任务输出日志**：实时捕获任务的 `stdout` 和 `stderr` 并直接记录至系统日志，支持全局及单任务级别的详细配置。
-- **内存优化**：即便在 1000+ 任务并发且开启 Web 控制台的情况下，依然保持极低的内存占用（约 10-20 MB）。
+- **内置 Web 控制台**：轻量级监控界面，可实时追踪任务状态、持久化统计及执行历史（包含 RESTful API）。
+- **持久化存储**：集成 SQLite 存储引擎，确保执行历史、成功/失败计数在容器或进程重启后不丢失，并支持自动化数据清理。
+- **任务输出日志**：自动捕获并持久化任务的 `stdout` 和 `stderr`，支持全局及单任务级别的详细配置。
+- **时区支持**：原生支持时区（如 `Asia/Shanghai`）。
 
 ---
 
@@ -204,6 +204,7 @@ json_logs = false            # 适配日志采集器的 JSON 格式
 api_host = "0.0.0.0"       # Web 控制台 / API 主机
 api_port = 8080              # Web 控制台 / API 端口
 api_token = "secret"         # API 鉴权 Token (若未设置将随机生成并在启动时打印)
+sql_file = "flashcron.db"    # SQLite 数据库文件路径
 max_concurrent_jobs = 10     # 0 = 不限制
 shell = "/bin/sh"            # 默认 Shell
 watch_config = true          # 配置文件变更热加载
@@ -213,8 +214,6 @@ timezone = "System"          # 时区 (如 "System", "UTC", "Asia/Shanghai")
 shutdown_timeout = 30        # 停机等待时间（秒）
 print_output = false         # 是否将任务输出打印至日志
 ```
-
-> **⚠️ 警告：** 执行历史完全存储在内存中。调大 `job_history_size` 或 `max_history_size`（尤其是对于输出量大且高频运行的任务）会显著增加内存消耗。
 
 ### 任务配置 (Job Configuration)
 

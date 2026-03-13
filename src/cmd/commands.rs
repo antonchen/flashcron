@@ -35,8 +35,28 @@ pub async fn run_daemon(config_path: PathBuf) -> Result<()> {
     #[cfg(feature = "web")]
     let api_port = config.settings.api_port;
 
+    #[cfg(feature = "web")]
+    let db = match flashcron::db::DatabaseManager::init(&config.settings.sql_file).await {
+        Ok(db) => {
+            // Run maintenance on startup
+            let active_jobs = config.jobs.keys().cloned().collect();
+            let job_size = config.settings.job_history_size;
+            let max_size = config.settings.max_history_size;
+            if let Err(e) = db.cleanup(active_jobs, job_size, max_size).await {
+                warn!(status = "db cleanup failed", error = &*e.to_string(); "");
+            }
+            Some(db)
+        }
+        Err(e) => {
+            error!(status = "database initialization failed", error = &*e.to_string(); "");
+            None
+        }
+    };
+    #[cfg(not(feature = "web"))]
+    let db = None;
+
     let shutdown_timeout = config.settings.shutdown_timeout;
-    let (scheduler, handle) = Scheduler::new(config, config_path.clone());
+    let (scheduler, handle) = Scheduler::new(config, config_path.clone(), db.clone());
 
     #[cfg(feature = "web")]
     let api_task = {
@@ -44,6 +64,7 @@ pub async fn run_daemon(config_path: PathBuf) -> Result<()> {
             config: scheduler.get_config(),
             scheduler_state: scheduler.get_state(),
             handle: handle.clone(),
+            db,
         };
         tokio::spawn(async move {
             if let Err(e) = flashcron::api::start_api_server(api_state, &api_host, api_port).await {

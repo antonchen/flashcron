@@ -21,6 +21,7 @@ pub const DEFAULT_MAX_HISTORY_SIZE: usize = 10000;
 pub const DEFAULT_API_HOST: &str = "0.0.0.0";
 #[cfg(feature = "web")]
 pub const DEFAULT_API_PORT: u16 = 8080;
+pub const DEFAULT_SQL_FILE: &str = "flashcron.db";
 
 /// Global settings for FlashCron
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -81,6 +82,10 @@ pub struct Settings {
     /// API authentication token
     #[cfg(feature = "web")]
     pub api_token: Option<String>,
+
+    /// SQLite database file path
+    #[serde(default = "default_sql_file")]
+    pub sql_file: String,
 
     /// Timezone for cron expressions (default: UTC)
     #[serde(default = "default_timezone")]
@@ -159,6 +164,10 @@ pub fn default_print_output() -> bool {
     DEFAULT_PRINT_OUTPUT
 }
 
+pub fn default_sql_file() -> String {
+    DEFAULT_SQL_FILE.to_string()
+}
+
 impl Default for Settings {
     fn default() -> Self {
         Self {
@@ -181,6 +190,7 @@ impl Default for Settings {
             api_port: default_api_port(),
             #[cfg(feature = "web")]
             api_token: None,
+            sql_file: default_sql_file(),
             timezone: default_timezone(),
             shutdown_timeout: default_shutdown_timeout(),
             print_output: default_print_output(),

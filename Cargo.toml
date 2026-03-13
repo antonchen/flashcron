@@ -39,6 +39,10 @@ iana-time-zone = "0.1"
 thiserror = "2.0"
 anyhow = "1.0"
 
+# Database
+rusqlite = { version = "0.32", features = ["bundled"] }
+tokio-rusqlite = "0.6"
+
 # Process management
 nix = { version = "0.31", features = ["signal", "process"], optional = true }
 

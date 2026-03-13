@@ -82,11 +82,9 @@
                 </div>
             </div>
 
-            <!-- History Panel -->
             <div class="w-full md:w-1/3 bg-white rounded-lg shadow flex flex-col h-[600px]">
                 <div class="px-6 py-4 border-b border-gray-200 bg-gray-50">
                     <h2 class="text-lg font-medium text-gray-900" id="history-title">Recent History</h2>
-                    <p class="text-xs text-gray-500 mt-1">Limited by <code class="bg-gray-200 px-1 rounded">job_history_size</code> (per job) and <code class="bg-gray-200 px-1 rounded">max_history_size</code> (global).</p>
                 </div>
                 <div class="p-0 overflow-y-auto flex-1 bg-gray-50" id="history-container">
                     <div class="p-6 text-center text-sm text-gray-500">Select a job to view history</div>
@@ -359,31 +357,36 @@
         async function updateDashboard() {
             const status = await fetchAPI('/api/status');
             const jobs = await fetchAPI('/api/jobs');
-            
+
             document.getElementById('last-updated').innerText = `Updated: ${new Date().toLocaleTimeString()}`;
             updateTabStyles();
 
             if (status && !status.error) {
-                const sr = status.total_executions ? ((status.total_executions - status.total_failures) / status.total_executions * 100).toFixed(1) : 100;
+                const uptime = status.uptime_seconds < 3600 
+                    ? Math.floor(status.uptime_seconds / 60) + 'm' 
+                    : (status.uptime_seconds / 3600).toFixed(1) + 'h';
+                const successes = status.total_executions - status.total_failures;
+
                 document.getElementById('stats-container').innerHTML = `
                     <div class="bg-white rounded-lg shadow p-6 border-t-4 border-indigo-500">
                         <div class="text-sm font-medium text-gray-500 truncate">Uptime</div>
-                        <div class="mt-1 text-3xl font-semibold text-gray-900">${(status.uptime_seconds / 3600).toFixed(1)}h</div>
+                        <div class="mt-1 text-3xl font-semibold text-gray-900">${uptime}</div>
                     </div>
                     <div class="bg-white rounded-lg shadow p-6 border-t-4 border-blue-500">
-                        <div class="text-sm font-medium text-gray-500 truncate">Active Jobs</div>
+                        <div class="text-sm font-medium text-gray-500 truncate">Scheduled Jobs</div>
                         <div class="mt-1 text-3xl font-semibold text-gray-900">${status.enabled_jobs} <span class="text-sm text-gray-400 font-normal">/ ${status.total_jobs}</span></div>
                     </div>
                     <div class="bg-white rounded-lg shadow p-6 border-t-4 border-yellow-500">
                         <div class="text-sm font-medium text-gray-500 truncate">Running Now</div>
-                        <div class="mt-1 text-3xl font-semibold text-gray-900">${status.running_jobs}</div>
+                        <div class="mt-1 text-3xl font-semibold text-gray-900 ${status.running_jobs > 0 ? 'text-yellow-600 animate-pulse' : ''}">${status.running_jobs}</div>
                     </div>
-                    <div class="bg-white rounded-lg shadow p-6 border-t-4 border-${sr < 95 ? 'red' : 'green'}-500">
-                        <div class="text-sm font-medium text-gray-500 truncate">Success Rate</div>
-                        <div class="mt-1 text-3xl font-semibold text-gray-900">${sr}%</div>
+                    <div class="bg-white rounded-lg shadow p-6 border-t-4 border-green-500">
+                        <div class="text-sm font-medium text-gray-500 truncate">Executions (Success / Fail)</div>
+                        <div class="mt-1 text-3xl font-semibold text-gray-900 text-green-600">${successes} <span class="text-sm text-red-500 font-normal">/ ${status.total_failures}</span></div>
                     </div>
                 `;
             } else if (!status) {
+
                  document.getElementById('stats-container').innerHTML = Array(4).fill(0).map(() => `
                     <div class="bg-white rounded-lg shadow p-6 border-t-4 border-gray-100">
                         <div class="h-4 w-1/3 skeleton rounded mb-2"></div>
@@ -399,7 +402,7 @@
                 const filteredJobs = jobs.filter(job => activeTab === 'enabled' ? job.enabled : !job.enabled);
                 
                 if (filteredJobs.length === 0) {
-                    tbody.innerHTML = `<tr><td colspan="5" class="px-6 py-10 text-center text-sm text-gray-500 italic">No ${activeTab} jobs found.</td></tr>`;
+                    tbody.innerHTML = `<tr><td colspan="7" class="px-6 py-10 text-center text-sm text-gray-500 italic">No ${activeTab} jobs found.</td></tr>`;
                 } else {
                     filteredJobs.sort((a, b) => a.name.localeCompare(b.name)).forEach(job => {
                         const isRunning = job.is_running;
@@ -471,7 +474,10 @@
                 `).join('');
             }
             
-            const data = await fetchAPI(`/api/history${jobName ? '?job_name=' + encodeURIComponent(jobName) : ''}`);
+            const data = await fetchAPI(jobName 
+                ? `/api/jobs/${encodeURIComponent(jobName)}/history?limit=50` 
+                : `/api/history?limit=50`
+            );
             if (!data || data.error || !data.history) return;
             
             if (data.history.length === 0) {

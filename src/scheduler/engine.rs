@@ -1,6 +1,7 @@
 //! Main scheduler engine
 
 use crate::config::{Config, Job, JobExecution, JobStatus};
+use crate::db::DatabaseManager;
 use crate::error::{Error, Result};
 use crate::executor::JobExecutor;
 use crate::scheduler::state::{ScheduledJob, SchedulerState};
@@ -62,13 +63,19 @@ pub struct Scheduler {
     trigger_queue: BinaryHeap<TimedTrigger>,
     /// Semaphore for limiting concurrent jobs
     job_semaphore: Arc<tokio::sync::Semaphore>,
+    /// Database manager
+    db: Option<DatabaseManager>,
     /// Shutdown flag
     shutdown: bool,
 }
 
 impl Scheduler {
     /// Create a new scheduler
-    pub fn new(config: Config, config_path: PathBuf) -> (Self, SchedulerHandle) {
+    pub fn new(
+        config: Config,
+        config_path: PathBuf,
+        db: Option<DatabaseManager>,
+    ) -> (Self, SchedulerHandle) {
         let (message_tx, message_rx) = mpsc::channel(100);
         let (event_tx, _) = broadcast::channel(100);
 
@@ -94,6 +101,7 @@ impl Scheduler {
             event_tx: event_tx.clone(),
             trigger_queue: BinaryHeap::new(),
             job_semaphore: semaphore,
+            db,
             shutdown: false,
         };
 
@@ -111,6 +119,13 @@ impl Scheduler {
         let tz = config_lock.settings.effective_timezone();
         let mut state = self.state.write().await;
 
+        // Load stats from database if available
+        let stats = if let Some(ref db) = self.db {
+            db.load_stats().await.unwrap_or_default()
+        } else {
+            std::collections::HashMap::new()
+        };
+
         for (name, job) in &config_lock.jobs {
             let next_run = if job.enabled {
                 job.next_run(tz)
@@ -118,8 +133,18 @@ impl Scheduler {
             } else {
                 None
             };
-            let scheduled_job = ScheduledJob::new(name.clone(), job.schedule.clone(), job.enabled)
-                .with_next_run(next_run);
+            let mut scheduled_job =
+                ScheduledJob::new(name.clone(), job.schedule.clone(), job.enabled)
+                    .with_next_run(next_run);
+
+            // Apply persistent stats
+            if let Some((success, failure)) = stats.get(name) {
+                scheduled_job.run_count = success + failure;
+                scheduled_job.failure_count = *failure;
+
+                state.total_executions += scheduled_job.run_count;
+                state.total_failures += scheduled_job.failure_count;
+            }
 
             state.add_job(scheduled_job);
 
@@ -178,6 +203,8 @@ impl Scheduler {
 
         debug!(status = "scheduler started"; "");
 
+        let mut maintenance_interval = time::interval(Duration::from_secs(24 * 3600));
+
         loop {
             // Calculate sleep duration until next trigger
             let sleep_duration = self.calculate_sleep_duration();
@@ -186,6 +213,19 @@ impl Scheduler {
                 // Wait for next trigger or message
                 _ = time::sleep(sleep_duration) => {
                     self.process_due_triggers().await?;
+                }
+
+                // Periodic maintenance
+                _ = maintenance_interval.tick() => {
+                    if let Some(ref db) = self.db {
+                        let config = self.config.read().await;
+                        let active_jobs = config.jobs.keys().cloned().collect();
+                        let job_size = config.settings.job_history_size;
+                        let max_size = config.settings.max_history_size;
+                        if let Err(e) = db.cleanup(active_jobs, job_size, max_size).await {
+                            warn!(status = "db cleanup failed", error = &*e.to_string(); "");
+                        }
+                    }
                 }
 
                 // Handle incoming messages
@@ -320,13 +360,10 @@ impl Scheduler {
         let state = Arc::clone(&self.state);
         let event_tx = self.event_tx.clone();
         let semaphore = Arc::clone(&self.job_semaphore);
+        let db = self.db.clone();
 
         let config_lock = self.config.read().await;
         let config = config_lock.clone();
-        #[cfg(feature = "web")]
-        let job_history_size = config.settings.job_history_size;
-        #[cfg(feature = "web")]
-        let max_history_size = config.settings.max_history_size;
         let print_output = job.print_output.unwrap_or(config.settings.print_output);
         drop(config_lock);
 
@@ -462,19 +499,17 @@ impl Scheduler {
 
             let success = matches!(status, JobStatus::Success);
 
+            // Save to database if enabled
+            if let Some(db) = db {
+                if let Err(e) = db.save(execution.clone()).await {
+                    error!(job_name = &*job_name, status = "db save failed", error = &*e.to_string(); "");
+                }
+            }
+
             // Update state
             {
                 let mut s = state.write().await;
-                s.record_job_completion(
-                    &job_name,
-                    status,
-                    execution,
-                    next_run,
-                    #[cfg(feature = "web")]
-                    job_history_size,
-                    #[cfg(feature = "web")]
-                    max_history_size,
-                );
+                s.record_job_completion(&job_name, status, execution, next_run);
             }
 
             // Emit completion event
@@ -713,7 +748,7 @@ mod tests {
     #[tokio::test]
     async fn test_scheduler_creation() {
         let config = test_config();
-        let (mut scheduler, handle) = Scheduler::new(config, PathBuf::from("test.toml"));
+        let (mut scheduler, handle) = Scheduler::new(config, PathBuf::from("test.toml"), None);
 
         // Initialize manually for testing
         scheduler.initialize().await.unwrap();
@@ -732,7 +767,7 @@ mod tests {
     #[tokio::test]
     async fn test_scheduler_status() {
         let config = test_config();
-        let (mut scheduler, _handle) = Scheduler::new(config, PathBuf::from("test.toml"));
+        let (mut scheduler, _handle) = Scheduler::new(config, PathBuf::from("test.toml"), None);
 
         // Initialize manually for testing
         scheduler.initialize().await.unwrap();
@@ -741,5 +776,39 @@ mod tests {
         let state = scheduler.state.read().await;
         assert_eq!(state.total_jobs, 1);
         assert_eq!(state.enabled_jobs, 1);
+    }
+
+    #[tokio::test]
+    async fn test_persistence_recovery() {
+        use tempfile::NamedTempFile;
+
+        let db_file = NamedTempFile::new().unwrap();
+        let db_path = db_file.path().to_str().unwrap().to_string();
+
+        // 1. Create DB and save a fake execution
+        let db = DatabaseManager::init(&db_path).await.unwrap();
+        let mut exec = JobExecution::new("test-job", "manual");
+        exec.complete_success(0, "ok".into(), "".into());
+        db.save(exec).await.unwrap();
+
+        // 2. Initialize scheduler with this DB
+        // Match config job name to our saved DB name
+        let config_str = r#"
+            [jobs.test-job]
+            schedule = "* * * * *"
+            command = "echo test"
+        "#;
+        let config = Config::from_str(config_str, "test.toml").unwrap();
+
+        let (mut scheduler, _handle) = Scheduler::new(config, PathBuf::from("test.toml"), Some(db));
+
+        // 3. Trigger manual initialization
+        scheduler.initialize().await.unwrap();
+
+        // 4. Verify recovery
+        let state = scheduler.state.read().await;
+        assert_eq!(state.total_executions, 1);
+        let job = state.get_job("test-job").unwrap();
+        assert_eq!(job.run_count, 1);
     }
 }

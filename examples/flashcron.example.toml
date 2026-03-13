@@ -26,6 +26,9 @@ api_port = 8080
 # If not set, a random UUID will be generated and printed to logs on startup.
 # api_token = "your-secret-token-here"
 
+# SQLite database file path for persistence (history, statistics)
+sql_file = "flashcron.db"
+
 # Default shell for executing commands
 # Linux/macOS: "/bin/sh", "/bin/bash"
 # Windows: "cmd", "powershell"
@@ -34,10 +37,10 @@ shell = "/bin/sh"
 # Automatically reload config when file changes
 watch_config = true
 
-# Max history entries to keep per job. Stored in RAM.
+# Max history entries to keep per job.
 job_history_size = 100
 
-# Max total history entries to keep globally. Warning: affects RAM usage.
+# Max total history entries to keep globally.
 max_history_size = 10000
 
 # Timezone for scheduling. Priority: TZ env > this setting > system > UTC

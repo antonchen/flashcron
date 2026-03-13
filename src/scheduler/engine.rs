@@ -111,27 +111,29 @@ impl Scheduler {
         let tz = config_lock.settings.effective_timezone();
         let mut state = self.state.write().await;
 
-        for (name, job) in config_lock.enabled_jobs() {
-            let next_run = job
-                .next_run(tz)
-                .map(|t: chrono::DateTime<chrono_tz::Tz>| t.with_timezone(&Utc));
+        for (name, job) in &config_lock.jobs {
+            let next_run = if job.enabled {
+                job.next_run(tz)
+                    .map(|t: chrono::DateTime<chrono_tz::Tz>| t.with_timezone(&Utc))
+            } else {
+                None
+            };
             let scheduled_job = ScheduledJob::new(name.clone(), job.schedule.clone(), job.enabled)
                 .with_next_run(next_run);
 
             state.add_job(scheduled_job);
 
-            // Add to trigger queue
-            if let Some(next) = next_run {
-                self.trigger_queue.push(TimedTrigger {
-                    trigger: JobTrigger::new(name.clone(), next, job.clone()),
-                });
+            // Add to trigger queue only if enabled
+            if job.enabled {
+                if let Some(next) = next_run {
+                    self.trigger_queue.push(TimedTrigger {
+                        trigger: JobTrigger::new(name.clone(), next, job.clone()),
+                    });
+                }
             }
         }
 
-        info!(
-            "Scheduler initialized with {} jobs ({} enabled), timezone: {}",
-            state.total_jobs, state.enabled_jobs, tz
-        );
+        debug!(status = "scheduler initialized"; "");
 
         Ok(())
     }
@@ -140,15 +142,15 @@ impl Scheduler {
     async fn run_startup_jobs(&mut self) -> Result<()> {
         let config = self.config.read().await;
         let startup_jobs: Vec<_> = config
-            .enabled_jobs()
-            .filter(|(_, job)| job.run_on_startup)
+            .jobs
+            .iter()
+            .filter(|(_, job)| job.enabled && job.run_on_startup)
             .map(|(name, _)| name.clone())
             .collect();
         drop(config);
 
         for job_name in startup_jobs {
-            info!(job_name = &*job_name; "Running startup");
-            self.trigger_job(&job_name).await?;
+            self.trigger_job_with_source(&job_name, "startup").await?;
         }
 
         Ok(())
@@ -157,6 +159,11 @@ impl Scheduler {
     /// Get the scheduler state reference
     pub fn get_state(&self) -> Arc<RwLock<SchedulerState>> {
         self.state.clone()
+    }
+
+    /// Get the configuration reference
+    pub fn get_config(&self) -> Arc<RwLock<Config>> {
+        self.config.clone()
     }
 
     /// Main scheduler loop
@@ -169,7 +176,7 @@ impl Scheduler {
         // Run startup jobs
         self.run_startup_jobs().await?;
 
-        info!("Scheduler started");
+        debug!(status = "scheduler started"; "");
 
         loop {
             // Calculate sleep duration until next trigger
@@ -196,10 +203,7 @@ impl Scheduler {
 
         let shutdown_timeout = self.config.read().await.settings.shutdown_timeout;
 
-        info!(
-            "Scheduler stopping, waiting up to {}s for jobs to finish...",
-            shutdown_timeout
-        );
+        debug!(status = "scheduler stopping"; "");
 
         // Wait for running jobs to finish, up to the timeout
         let state = self.state.clone();
@@ -218,14 +222,15 @@ impl Scheduler {
 
         if wait_result.is_err() {
             log::warn!(
-                "Graceful shutdown timed out ({}s). Forcing exit...",
-                shutdown_timeout
+                status = "shutdown timedout",
+                timeout = &*format!("{}s", shutdown_timeout);
+                ""
             );
         } else {
-            info!("All jobs finished, shutting down completely.");
+            debug!(status = "all jobs finished"; "");
         }
 
-        info!("Scheduler stopped");
+        debug!(status = "scheduler stopped"; "");
         let _ = self.event_tx.send(SchedulerEvent::Stopped);
 
         Ok(())
@@ -292,18 +297,25 @@ impl Scheduler {
             let state = self.state.read().await;
             if let Some(sj) = state.get_job(&job_name) {
                 if sj.is_running {
-                    debug!(job_name = &*job_name; "Job already running, skipping");
+                    debug!(job_name = &*job_name, status = "skipped running"; "");
                     return Ok(());
                 }
             }
         }
 
-        // Spawn job execution
-        self.spawn_job_execution(job_name, job).await
+        // Spawn job execution (Trigger: cron)
+        self.spawn_job_execution(job_name, job, "cron")
+            .await
+            .map(|_| ())
     }
 
     /// Spawn a job execution task
-    async fn spawn_job_execution(&self, job_name: String, job: Job) -> Result<()> {
+    async fn spawn_job_execution(
+        &self,
+        job_name: String,
+        job: Job,
+        trigger_source: &'static str,
+    ) -> crate::error::Result<uuid::Uuid> {
         let executor = Arc::clone(&self.executor);
         let state = Arc::clone(&self.state);
         let event_tx = self.event_tx.clone();
@@ -318,19 +330,19 @@ impl Scheduler {
         let print_output = job.print_output.unwrap_or(config.settings.print_output);
         drop(config_lock);
 
+        // Create execution record before spawning so we can return the ID
+        let mut execution = JobExecution::new(&job_name, trigger_source);
+        let execution_id = execution.id;
+
         tokio::spawn(async move {
             // Acquire semaphore permit
             let _permit = match semaphore.acquire().await {
                 Ok(p) => p,
                 Err(_) => {
-                    error!(job_name = &*job_name; "Failed to acquire job semaphore");
+                    error!(job_name = &*job_name, trigger = trigger_source, status = "semaphore failed"; "");
                     return;
                 }
             };
-
-            // Create execution record
-            let mut execution = JobExecution::new(&job_name);
-            let execution_id = execution.id;
 
             // Update state - mark as running
             {
@@ -345,7 +357,13 @@ impl Scheduler {
             });
 
             let exec_id_str = execution_id.to_string();
-            info!(job_name = &*job_name, execution_id = &*exec_id_str; "Starting");
+            info!(
+                job_name = &*job_name,
+                trigger = trigger_source,
+                status = "starting",
+                execution_id = &*exec_id_str;
+                ""
+            );
 
             // Execute the job
             let start = Instant::now();
@@ -357,10 +375,10 @@ impl Scheduler {
                 Ok((exit_code, stdout, stderr)) => {
                     if print_output {
                         for line in stdout.lines() {
-                            info!(job_name = &*job_name, output = line; "");
+                            info!(job_name = &*job_name, status = "output", output = line; "");
                         }
                         for line in stderr.lines() {
-                            error!(job_name = &*job_name, output = line; "");
+                            error!(job_name = &*job_name, status = "output", output = line; "");
                         }
                     }
 
@@ -369,8 +387,10 @@ impl Scheduler {
                         execution.complete_success(exit_code, stdout, stderr);
                         info!(
                             job_name = &*job_name,
+                            trigger = trigger_source,
+                            status = "success",
                             duration = &*duration_str;
-                            "Job completed successfully"
+                            ""
                         );
                         let tz = config.settings.effective_timezone();
                         (
@@ -388,8 +408,10 @@ impl Scheduler {
                         );
                         warn!(
                             job_name = &*job_name,
+                            trigger = trigger_source,
+                            status = "failed",
                             exit_code = exit_code;
-                            "Job failed"
+                            ""
                         );
                         let tz = config.settings.effective_timezone();
                         (
@@ -401,7 +423,12 @@ impl Scheduler {
                 }
                 Err(Error::JobTimeout { .. }) => {
                     execution.complete_timeout();
-                    warn!(job_name = &*job_name; "Job timed out");
+                    warn!(
+                        job_name = &*job_name,
+                        trigger = trigger_source,
+                        status = "timeout";
+                        ""
+                    );
                     let tz = config.settings.effective_timezone();
                     (
                         JobStatus::Timeout,
@@ -417,7 +444,13 @@ impl Scheduler {
                         String::new(),
                         String::new(),
                     );
-                    error!(job_name = &*job_name, error = &*error_msg; "Job execution error");
+                    error!(
+                        job_name = &*job_name,
+                        trigger = trigger_source,
+                        status = "error",
+                        error = &*error_msg;
+                        ""
+                    );
                     let tz = config.settings.effective_timezone();
                     (
                         JobStatus::Failed { error: error_msg },
@@ -453,11 +486,20 @@ impl Scheduler {
             });
         });
 
-        Ok(())
+        Ok(execution_id)
     }
 
     /// Trigger a job immediately
-    async fn trigger_job(&mut self, job_name: &str) -> Result<()> {
+    async fn trigger_job(&mut self, job_name: &str) -> crate::error::Result<uuid::Uuid> {
+        self.trigger_job_with_source(job_name, "manual").await
+    }
+
+    /// Trigger a job immediately with explicit source
+    async fn trigger_job_with_source(
+        &mut self,
+        job_name: &str,
+        source: &'static str,
+    ) -> crate::error::Result<uuid::Uuid> {
         let config = self.config.read().await;
         let job = config
             .get_job(job_name)
@@ -465,15 +507,24 @@ impl Scheduler {
             .clone();
         drop(config);
 
-        info!(job_name = job_name; "Manually triggering");
-        self.spawn_job_execution(job_name.to_string(), job).await
+        self.spawn_job_execution(job_name.to_string(), job, source)
+            .await
     }
 
     /// Reload configuration from file
     async fn reload_config(&mut self) -> Result<()> {
-        info!("Reloading configuration from {:?}", self.config_path);
+        debug!(status = "reloading configuration"; "");
 
-        let new_config = Config::from_file(&self.config_path)?;
+        let mut new_config = Config::from_file(&self.config_path)?;
+
+        // Preserve existing api_token if the new config doesn't set one
+        #[cfg(feature = "web")]
+        {
+            let old_config = self.config.read().await;
+            if new_config.settings.api_token.is_none() && old_config.settings.api_token.is_some() {
+                new_config.settings.api_token = old_config.settings.api_token.clone();
+            }
+        }
 
         // Update executor shell settings
         self.executor.update_shell(
@@ -496,10 +547,13 @@ impl Scheduler {
 
         // Add jobs from new config
         let tz = new_config.settings.effective_timezone();
-        for (name, job) in new_config.enabled_jobs() {
-            let next_run = job
-                .next_run(tz)
-                .map(|t: chrono::DateTime<chrono_tz::Tz>| t.with_timezone(&Utc));
+        for (name, job) in &new_config.jobs {
+            let next_run = if job.enabled {
+                job.next_run(tz)
+                    .map(|t: chrono::DateTime<chrono_tz::Tz>| t.with_timezone(&Utc))
+            } else {
+                None
+            };
             let mut scheduled_job =
                 ScheduledJob::new(name.clone(), job.schedule.clone(), job.enabled)
                     .with_next_run(next_run);
@@ -507,7 +561,6 @@ impl Scheduler {
             // Preserve previous state
             if let Some(old_job) = old_jobs.get(name) {
                 scheduled_job.is_running = old_job.is_running;
-                scheduled_job.current_execution_id = old_job.current_execution_id;
                 scheduled_job.last_run = old_job.last_run;
                 scheduled_job.last_status = old_job.last_status.clone();
                 scheduled_job.run_count = old_job.run_count;
@@ -516,10 +569,12 @@ impl Scheduler {
 
             state.add_job(scheduled_job);
 
-            if let Some(next) = next_run {
-                self.trigger_queue.push(TimedTrigger {
-                    trigger: JobTrigger::new(name.clone(), next, job.clone()),
-                });
+            if job.enabled {
+                if let Some(next) = next_run {
+                    self.trigger_queue.push(TimedTrigger {
+                        trigger: JobTrigger::new(name.clone(), next, job.clone()),
+                    });
+                }
             }
         }
 
@@ -528,7 +583,12 @@ impl Scheduler {
 
         *self.config.write().await = new_config;
 
-        info!(job_count = job_count as u64; "Configuration reloaded");
+        info!(
+            status = "config reloaded",
+            file = self.config_path.to_string_lossy().as_ref(),
+            enabled = job_count as u64;
+            ""
+        );
         let _ = self
             .event_tx
             .send(SchedulerEvent::ConfigReloaded { job_count });
@@ -539,16 +599,21 @@ impl Scheduler {
     /// Handle incoming messages
     async fn handle_message(&mut self, msg: SchedulerMessage) -> Result<bool> {
         match msg {
-            SchedulerMessage::TriggerJob { job_name } => {
-                if let Err(e) = self.trigger_job(&job_name).await {
+            SchedulerMessage::TriggerJob {
+                job_name,
+                response_tx,
+            } => {
+                let result = self.trigger_job(&job_name).await;
+                if let Err(e) = &result {
                     let err_str = e.to_string();
-                    warn!(job_name = &*job_name, error = &*err_str; "Failed to trigger");
+                    warn!(job_name = &*job_name, status = "trigger failed", error = &*err_str; "");
                 }
+                let _ = response_tx.send(result);
             }
             SchedulerMessage::ReloadConfig => {
                 if let Err(e) = self.reload_config().await {
                     let err_str = e.to_string();
-                    error!(error = &*err_str; "Failed to reload configuration");
+                    error!(status = "reload failed", error = &*err_str; "");
                 }
             }
             SchedulerMessage::GetStatus { response_tx } => {
@@ -558,10 +623,10 @@ impl Scheduler {
             }
             SchedulerMessage::StopJob { job_name } => {
                 // TODO: Implement job cancellation
-                warn!(job_name = &*job_name; "Cancellation not yet implemented");
+                warn!(job_name = &*job_name, status = "stop unimplemented"; "");
             }
             SchedulerMessage::Shutdown => {
-                info!("Shutdown requested");
+                debug!(status = "shutdown requested"; "");
                 self.shutdown = true;
                 return Ok(true);
             }
@@ -587,11 +652,14 @@ impl SchedulerHandle {
     }
 
     /// Trigger a job immediately
-    pub async fn trigger_job(&self, job_name: impl Into<String>) -> Result<()> {
+    pub async fn trigger_job(&self, job_name: impl Into<String>) -> Result<uuid::Uuid> {
+        let (tx, rx) = tokio::sync::oneshot::channel();
         self.send(SchedulerMessage::TriggerJob {
             job_name: job_name.into(),
+            response_tx: tx,
         })
-        .await
+        .await?;
+        rx.await.map_err(|_| Error::ChannelSend)?
     }
 
     /// Reload configuration
@@ -645,7 +713,17 @@ mod tests {
     #[tokio::test]
     async fn test_scheduler_creation() {
         let config = test_config();
-        let (_scheduler, handle) = Scheduler::new(config, PathBuf::from("test.toml"));
+        let (mut scheduler, handle) = Scheduler::new(config, PathBuf::from("test.toml"));
+
+        // Initialize manually for testing
+        scheduler.initialize().await.unwrap();
+
+        // Spawn a task to process messages
+        tokio::spawn(async move {
+            if let Some(msg) = scheduler.message_rx.recv().await {
+                scheduler.handle_message(msg).await.unwrap();
+            }
+        });
 
         // Verify handle works
         assert!(handle.trigger_job("test").await.is_ok());

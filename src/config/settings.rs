@@ -78,6 +78,10 @@ pub struct Settings {
     #[serde(default = "default_api_port")]
     pub api_port: u16,
 
+    /// API authentication token
+    #[cfg(feature = "web")]
+    pub api_token: Option<String>,
+
     /// Timezone for cron expressions (default: UTC)
     #[serde(default = "default_timezone")]
     pub timezone: String,
@@ -175,6 +179,8 @@ impl Default for Settings {
             api_host: default_api_host(),
             #[cfg(feature = "web")]
             api_port: default_api_port(),
+            #[cfg(feature = "web")]
+            api_token: None,
             timezone: default_timezone(),
             shutdown_timeout: default_shutdown_timeout(),
             print_output: default_print_output(),

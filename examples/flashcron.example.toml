@@ -22,6 +22,10 @@ api_host = "0.0.0.0"
 # Default: 8080
 api_port = 8080
 
+# API authentication token for write operations (trigger, etc.)
+# If not set, a random UUID will be generated and printed to logs on startup.
+# api_token = "your-secret-token-here"
+
 # Default shell for executing commands
 # Linux/macOS: "/bin/sh", "/bin/bash"
 # Windows: "cmd", "powershell"

@@ -1,22 +1,32 @@
 use anyhow::{Context, Result};
 use flashcron::{Config, Scheduler};
-use log::{error, info};
+use log::{debug, error, info, warn};
 use std::path::PathBuf;
+use uuid::Uuid;
 
 /// Run the daemon
 pub async fn run_daemon(config_path: PathBuf) -> Result<()> {
-    info!("Starting FlashCron v{}", flashcron::VERSION);
+    debug!(status = "starting flashcron"; "");
 
     // Load configuration
-    let config = Config::from_file(&config_path)
+    let mut config = Config::from_file(&config_path)
         .with_context(|| format!("Failed to load config from {:?}", config_path))?;
+
+    #[cfg(feature = "web")]
+    {
+        if config.settings.api_token.is_none() {
+            let token = Uuid::new_v4().to_string();
+            warn!(api_token = &*token; "generated");
+            config.settings.api_token = Some(token);
+        }
+    }
 
     crate::cmd::state::save_state(&config_path);
 
     info!(
-        "Loaded {} jobs ({} enabled)",
-        config.jobs.len(),
-        config.enabled_jobs().count()
+        total = config.jobs.len(),
+        enabled = config.enabled_jobs().count();
+        ""
     );
 
     // Create scheduler
@@ -25,17 +35,19 @@ pub async fn run_daemon(config_path: PathBuf) -> Result<()> {
     #[cfg(feature = "web")]
     let api_port = config.settings.api_port;
 
+    let shutdown_timeout = config.settings.shutdown_timeout;
     let (scheduler, handle) = Scheduler::new(config, config_path.clone());
 
     #[cfg(feature = "web")]
     let api_task = {
         let api_state = flashcron::api::ApiState {
+            config: scheduler.get_config(),
             scheduler_state: scheduler.get_state(),
             handle: handle.clone(),
         };
         tokio::spawn(async move {
             if let Err(e) = flashcron::api::start_api_server(api_state, &api_host, api_port).await {
-                error!("API server error: {}", e);
+                error!(status = "api server error", error = &*e.to_string(); "");
             }
         })
     };
@@ -45,23 +57,22 @@ pub async fn run_daemon(config_path: PathBuf) -> Result<()> {
     let watch_path = config_path.clone();
     let watcher_task = tokio::spawn(async move {
         if let Err(e) = watch_config_file(watch_path, reload_handle).await {
-            error!("Config watcher error: {}", e);
+            error!(status = "config watcher error", error = &*e.to_string(); "");
         }
     });
 
     // Wait for shutdown signal in a separate task
     let scheduler_handle_for_sig = handle.clone();
     tokio::spawn(async move {
-        if let Err(e) = wait_for_shutdown_signal().await {
-            error!("Signal handler error: {}", e);
+        if let Err(e) = wait_for_shutdown_signal(shutdown_timeout).await {
+            error!(status = "signal handler error", error = &*e.to_string(); "");
         }
-        info!("Shutting down gracefully...");
         let _ = scheduler_handle_for_sig.shutdown().await;
     });
 
     // Run scheduler to completion
     if let Err(e) = scheduler.run().await {
-        error!("Scheduler error: {}", e);
+        error!(status = "scheduler error", error = &*e.to_string(); "");
     }
 
     // Abort background tasks
@@ -72,12 +83,13 @@ pub async fn run_daemon(config_path: PathBuf) -> Result<()> {
 
     crate::cmd::state::clear_state();
 
-    info!("FlashCron stopped");
+    info!(status = "stopped"; "");
     Ok(())
 }
 
 /// Wait for shutdown signal (Ctrl+C or SIGTERM)
-async fn wait_for_shutdown_signal() -> Result<()> {
+async fn wait_for_shutdown_signal(timeout_secs: u64) -> Result<()> {
+    let timeout_str = format!("{}s", timeout_secs);
     #[cfg(unix)]
     {
         use tokio::signal::unix::{signal, SignalKind};
@@ -86,16 +98,16 @@ async fn wait_for_shutdown_signal() -> Result<()> {
         let mut sighup = signal(SignalKind::hangup())?;
 
         tokio::select! {
-            res = sigterm.recv() => { if res.is_none() { return Ok(()); } info!("Received SIGTERM"); },
-            res = sigint.recv() => { if res.is_none() { return Ok(()); } info!("Received SIGINT"); },
-            res = sighup.recv() => { if res.is_none() { return Ok(()); } info!("Received SIGHUP"); },
+            res = sigterm.recv() => { if res.is_none() { return Ok(()); } info!(status = "shutting down", signal = "SIGTERM", timeout = &*timeout_str; ""); },
+            res = sigint.recv() => { if res.is_none() { return Ok(()); } info!(status = "shutting down", signal = "SIGINT", timeout = &*timeout_str; ""); },
+            res = sighup.recv() => { if res.is_none() { return Ok(()); } info!(status = "shutting down", signal = "SIGHUP", timeout = &*timeout_str; ""); },
         }
     }
 
     #[cfg(windows)]
     {
         tokio::signal::ctrl_c().await?;
-        info!("Received Ctrl+C");
+        info!(status = "shutting down", signal = "CTRL-C", timeout = &*timeout_str; "");
     }
 
     Ok(())
@@ -121,22 +133,24 @@ async fn watch_config_file(
 
     watcher.watch(&path, RecursiveMode::NonRecursive)?;
 
-    info!("Watching config file {:?} for changes", path);
+    info!(watching = path.to_string_lossy().as_ref(); "");
 
     loop {
         // Use try_recv to avoid blocking the tokio worker thread
         match rx.try_recv() {
             Ok(Ok(event)) => {
                 if event.kind.is_modify() || event.kind.is_create() {
-                    info!("Config file changed, reloading...");
+                    debug!(status = "config file changed"; "");
+                    // Empty the channel to debounce multiple events for the same file change
+                    while rx.try_recv().is_ok() {}
                     tokio::time::sleep(Duration::from_millis(100)).await;
                     if let Err(e) = handle.reload_config().await {
-                        error!("Failed to reload config: {}", e);
+                        error!(status = "failed to reload config", error = &*e.to_string(); "");
                     }
                 }
             }
             Ok(Err(e)) => {
-                error!("Watch error: {:?}", e);
+                error!(status = "watch error", error = &*format!("{:?}", e); "");
             }
             Err(mpsc::TryRecvError::Empty) => {
                 // Yield to tokio and wait a bit before checking again

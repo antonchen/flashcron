@@ -14,7 +14,10 @@ use uuid::Uuid;
 #[derive(Debug)]
 pub enum SchedulerMessage {
     /// Trigger a job immediately
-    TriggerJob { job_name: String },
+    TriggerJob {
+        job_name: String,
+        response_tx: tokio::sync::oneshot::Sender<crate::error::Result<Uuid>>,
+    },
     /// Reload configuration
     ReloadConfig,
     /// Get scheduler status

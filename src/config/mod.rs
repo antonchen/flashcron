@@ -52,9 +52,10 @@ impl Config {
         {
             if self.settings.job_history_size > self.settings.max_history_size {
                 log::warn!(
-                    "job_history_size ({}) is greater than max_history_size ({}). Individual job history will be limited by the global maximum.",
-                    self.settings.job_history_size,
-                    self.settings.max_history_size
+                    status = "history size mismatch",
+                    job_history_size = self.settings.job_history_size,
+                    max_history_size = self.settings.max_history_size;
+                    ""
                 );
             }
         }
@@ -108,6 +109,10 @@ job_history_size = {job_history}
 
 # Max total history entries to keep globally. Warning: affects RAM usage.
 max_history_size = {max_history}
+
+# API authentication token for write operations (trigger, etc.)
+# If not set, a random UUID will be generated and printed to logs on startup.
+# api_token = "secret-token"
 
 # Timezone for job scheduling. Priority: TZ env > config > system > UTC
 # Examples: "System", "UTC", "Asia/Shanghai", "America/New_York"

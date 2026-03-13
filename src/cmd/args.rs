@@ -79,7 +79,7 @@ pub enum Commands {
         job_name: Option<String>,
 
         /// Limit number of records
-        #[arg(short, long, default_value = "20")]
+        #[arg(long, default_value = "20")]
         limit: usize,
 
         /// Query specific execution by ID

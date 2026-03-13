@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Manual job triggers, dashboard tab filtering, and secure `api_token` authentication.
+
 ## [0.2.0] - 2026-03-12
 
 ### Added

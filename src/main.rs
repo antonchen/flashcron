@@ -44,7 +44,7 @@ async fn main() -> Result<()> {
     };
 
     if let Err(e) = result {
-        error!("Error: {}", e);
+        error!(status = "error", error = &*e.to_string(); "");
         // Allow time for logs to be flushed
         tokio::time::sleep(Duration::from_millis(100)).await;
         std::process::exit(1);

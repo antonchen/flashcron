@@ -44,4 +44,6 @@ logs/
 # Test/simulation files
 simulation.toml
 test_config.toml
+run_tests.sh
 *.bat
+GEMINI.md

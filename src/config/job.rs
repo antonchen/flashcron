@@ -110,8 +110,9 @@ impl Job {
             if !dir.exists() {
                 warn!(
                     job_name = name,
+                    status = "working directory does not exist",
                     working_dir = &*dir.display().to_string();
-                    "Working directory does not exist"
+                    ""
                 );
             }
         }
@@ -285,6 +286,9 @@ pub struct JobExecution {
     pub id: Uuid,
     /// Job name
     pub job_name: String,
+    /// Trigger source (cron, manual, startup)
+    #[serde(default = "default_trigger")]
+    pub trigger: String,
     /// Start time
     pub started_at: chrono::DateTime<chrono::Utc>,
     /// End time (if completed)
@@ -301,12 +305,17 @@ pub struct JobExecution {
     pub attempt: u32,
 }
 
+fn default_trigger() -> String {
+    "unknown".to_string()
+}
+
 impl JobExecution {
     /// Create a new job execution record
-    pub fn new(job_name: impl Into<String>) -> Self {
+    pub fn new(job_name: impl Into<String>, trigger: impl Into<String>) -> Self {
         Self {
             id: Uuid::new_v4(),
             job_name: job_name.into(),
+            trigger: trigger.into(),
             started_at: chrono::Utc::now(),
             ended_at: None,
             status: JobStatus::Running,
@@ -409,7 +418,7 @@ mod tests {
 
     #[test]
     fn test_job_execution() {
-        let mut exec = JobExecution::new("test-job");
+        let mut exec = JobExecution::new("test-job", "manual");
         assert!(exec.is_running());
 
         exec.complete_success(0, "output".to_string(), "".to_string());

@@ -38,9 +38,10 @@ impl JobExecutor {
 
         debug!(
             job_name = job_name,
+            status = "executing job",
             command = &*job.command,
             shell = &*shell;
-            "Executing job"
+            ""
         );
 
         // Build command
@@ -146,7 +147,7 @@ impl JobExecutor {
                 }
                 Err(_) => {
                     // Timeout - process will be killed due to kill_on_drop
-                    warn!(job_name = job_name, timeout = job.timeout; "Job timed out");
+                    warn!(job_name = job_name, status = "job timed out", timeout = job.timeout; "");
                     Err(Error::job_timeout(job_name, job.timeout))
                 }
             }
@@ -207,11 +208,7 @@ mod tests {
     async fn test_execute_simple_command() {
         let executor = JobExecutor::default();
 
-        let cmd = if cfg!(windows) {
-            "echo hello"
-        } else {
-            "echo hello"
-        };
+        let cmd = "echo hello";
 
         let job = test_job(cmd);
         let result = executor.execute("test", &job).await;
@@ -226,7 +223,7 @@ mod tests {
     async fn test_execute_failing_command() {
         let executor = JobExecutor::default();
 
-        let cmd = if cfg!(windows) { "exit 1" } else { "exit 1" };
+        let cmd = "exit 1";
 
         let job = test_job(cmd);
         let result = executor.execute("test", &job).await;

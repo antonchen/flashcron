@@ -45,7 +45,6 @@ pub fn init_logging(cli: &Cli, config_path: &std::path::PathBuf) -> Result<()> {
                     // Extract KV pairs from the record
                     let mut kv_map = serde_json::Map::new();
 
-                    // A simple visitor to collect KVs
                     struct JsonVisitor<'a>(&'a mut serde_json::Map<String, serde_json::Value>);
                     impl<'kvs> log::kv::Visitor<'kvs> for JsonVisitor<'_> {
                         fn visit_pair(
@@ -54,6 +53,7 @@ pub fn init_logging(cli: &Cli, config_path: &std::path::PathBuf) -> Result<()> {
                             value: log::kv::Value<'kvs>,
                         ) -> std::result::Result<(), log::kv::Error> {
                             let key_str = key.to_string();
+                            // Standardize job_name to job
                             let final_key = if key_str == "job_name" {
                                 "job"
                             } else {
@@ -68,7 +68,6 @@ pub fn init_logging(cli: &Cli, config_path: &std::path::PathBuf) -> Result<()> {
                     }
                     let _ = record.key_values().visit(&mut JsonVisitor(&mut kv_map));
 
-                    // Construct the final JSON object with timestamp FIRST
                     let mut json_obj = serde_json::Map::new();
                     json_obj.insert(
                         "timestamp".to_string(),
@@ -81,23 +80,21 @@ pub fn init_logging(cli: &Cli, config_path: &std::path::PathBuf) -> Result<()> {
 
                     let msg_str = message.to_string();
 
-                    if kv_map.is_empty() {
-                        // Standard message, no fields nesting
-                        json_obj.insert("message".to_string(), serde_json::Value::String(msg_str));
-                    } else {
-                        // For KV-rich logs, message is an object
-                        let mut message_content = serde_json::Map::new();
-                        for (k, v) in kv_map {
-                            message_content.insert(k, v);
-                        }
-                        if !msg_str.is_empty() {
-                            message_content
-                                .insert("message".to_string(), serde_json::Value::String(msg_str));
-                        }
+                    let mut content = serde_json::Map::new();
+                    for (k, v) in kv_map {
+                        content.insert(k, v);
+                    }
+                    if !msg_str.is_empty() {
+                        content.insert("msg".to_string(), serde_json::Value::String(msg_str));
+                    }
+
+                    if content.is_empty() {
                         json_obj.insert(
                             "message".to_string(),
-                            serde_json::Value::Object(message_content),
+                            serde_json::Value::String(String::new()),
                         );
+                    } else {
+                        json_obj.insert("message".to_string(), serde_json::Value::Object(content));
                     }
 
                     out.finish(format_args!("{}", serde_json::Value::Object(json_obj)));
@@ -113,7 +110,6 @@ pub fn init_logging(cli: &Cli, config_path: &std::path::PathBuf) -> Result<()> {
                         .format("%Y-%m-%d %H:%M:%S%.3f")
                         .to_string();
 
-                    // Extract KV pairs
                     let mut kvs = Vec::new();
                     struct TextVisitor<'a>(&'a mut Vec<(String, String)>);
                     impl<'kvs> log::kv::Visitor<'kvs> for TextVisitor<'_> {
@@ -128,58 +124,28 @@ pub fn init_logging(cli: &Cli, config_path: &std::path::PathBuf) -> Result<()> {
                     }
                     let _ = record.key_values().visit(&mut TextVisitor(&mut kvs));
 
-                    let mut kv_str = String::new();
-                    let mut job_name = None;
-                    let mut output = None;
-                    let mut status = None;
+                    let msg_str = message.to_string();
+                    let mut final_msg = String::new();
 
                     for (k, v) in kvs {
-                        if k == "job_name" || k == "job" {
-                            job_name = Some(v);
-                        } else if k == "output" {
-                            output = Some(v);
-                        } else if k == "status" {
-                            status = Some(v);
-                        } else {
-                            if !kv_str.is_empty() {
-                                kv_str.push(' ');
-                            }
-                            kv_str.push_str(&format!("{}={}", k, v));
+                        if !final_msg.is_empty() {
+                            final_msg.push(' ');
                         }
+                        final_msg.push_str(&format!("{}={}", k, v));
                     }
 
-                    let msg_str = message.to_string();
-
-                    // Special formatting for job output/status as requested
-                    let final_msg = if let Some(job) = job_name {
-                        if let Some(out_val) = output {
-                            format!("job={} output: {}", job, out_val)
-                        } else if let Some(stat_val) = status {
-                            format!("job={} status: {}", job, stat_val)
-                        } else {
-                            if !msg_str.is_empty() {
-                                format!("{} job={}", msg_str, job)
-                            } else {
-                                format!("job={}", job)
-                            }
+                    if !msg_str.is_empty() {
+                        if !final_msg.is_empty() {
+                            final_msg.push(' ');
                         }
-                    } else {
-                        msg_str
-                    };
-
-                    let mut final_with_kv = final_msg;
-                    if !kv_str.is_empty() {
-                        if !final_with_kv.is_empty() {
-                            final_with_kv.push(' ');
-                        }
-                        final_with_kv.push_str(&kv_str);
+                        final_msg.push_str(&msg_str);
                     }
 
                     out.finish(format_args!(
                         "{}  {:<5} {}",
                         timestamp,
                         record.level(),
-                        final_with_kv
+                        final_msg
                     ))
                 })
                 .chain(std::io::stdout()),

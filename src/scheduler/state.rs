@@ -29,8 +29,6 @@ pub struct ScheduledJob {
     pub failure_count: u64,
     /// Whether the job is currently running
     pub is_running: bool,
-    /// Current execution ID (if running)
-    pub current_execution_id: Option<Uuid>,
 }
 
 impl ScheduledJob {
@@ -46,7 +44,6 @@ impl ScheduledJob {
             run_count: 0,
             failure_count: 0,
             is_running: false,
-            current_execution_id: None,
         }
     }
 
@@ -57,16 +54,14 @@ impl ScheduledJob {
     }
 
     /// Mark as started
-    pub fn mark_started(&mut self, execution_id: Uuid) {
+    pub fn mark_started(&mut self, _execution_id: Uuid) {
         self.is_running = true;
-        self.current_execution_id = Some(execution_id);
         self.last_run = Some(Utc::now());
     }
 
     /// Mark as completed
     pub fn mark_completed(&mut self, status: JobStatus, next_run: Option<DateTime<Utc>>) {
         self.is_running = false;
-        self.current_execution_id = None;
         self.run_count += 1;
         self.next_run = next_run;
 
@@ -151,9 +146,9 @@ impl SchedulerState {
     }
 
     /// Record job start
-    pub fn record_job_start(&mut self, job_name: &str, execution_id: Uuid) {
+    pub fn record_job_start(&mut self, job_name: &str, _execution_id: Uuid) {
         if let Some(job) = self.jobs.get_mut(job_name) {
-            job.mark_started(execution_id);
+            job.mark_started(_execution_id);
             self.running_jobs += 1;
         }
     }
@@ -248,7 +243,6 @@ mod tests {
         let exec_id = Uuid::new_v4();
         job.mark_started(exec_id);
         assert!(job.is_running);
-        assert_eq!(job.current_execution_id, Some(exec_id));
 
         job.mark_completed(JobStatus::Success, None);
         assert!(!job.is_running);

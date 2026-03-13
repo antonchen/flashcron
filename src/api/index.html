@@ -7,13 +7,24 @@
     <title>FlashCron Dashboard</title>
     <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
     <style type="text/tailwindcss">
-        @theme {
+        :root {
             --animate-pulse-slow: pulse-slow 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
         }
 
         @keyframes pulse-slow {
             0%, 100% { opacity: 1; }
             50% { opacity: 0.5; }
+        }
+
+        .skeleton {
+            background: linear-gradient(90deg, #f0f0f0 25%, #f8f8f8 50%, #f0f0f0 75%);
+            background-size: 200% 100%;
+            animation: skeleton-loading 1.5s infinite;
+        }
+
+        @keyframes skeleton-loading {
+            0% { background-position: 200% 0; }
+            100% { background-position: -200% 0; }
         }
     </style>
 </head>
@@ -22,12 +33,17 @@
         <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
             <div class="flex items-center justify-between h-16">
                 <div class="flex items-center space-x-3">
-                    <svg class="h-8 w-8" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <svg class="h-8 w-8 text-indigo-200" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z" />
                     </svg>
                     <span class="font-bold text-xl tracking-wider">FlashCron</span>
                 </div>
-                <div class="text-sm font-medium opacity-80" id="last-updated">Updating...</div>
+                <div class="flex items-center gap-6">
+                    <div class="hidden sm:block text-xs font-medium opacity-80" id="last-updated">Updating...</div>
+                    <button onclick="logout()" title="Logout" class="p-2 hover:bg-white/10 rounded-full transition-colors">
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"/></svg>
+                    </button>
+                </div>
             </div>
         </div>
     </nav>
@@ -41,21 +57,26 @@
         <div class="flex flex-col md:flex-row gap-8">
             <!-- Jobs Table -->
             <div class="w-full md:w-2/3 bg-white rounded-lg shadow overflow-hidden">
-                <div class="px-6 py-4 border-b border-gray-200 bg-gray-50 flex justify-between items-center">
+                <div class="px-6 py-4 border-b border-gray-200 bg-gray-50 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
                     <h2 class="text-lg font-medium text-gray-900">Scheduled Jobs</h2>
+                    <div class="flex p-1 bg-gray-200 rounded-lg">
+                        <button type="button" onclick="setTab('enabled')" id="tab-enabled" class="px-4 py-1.5 text-sm font-medium rounded-md transition-all">Enabled</button>
+                        <button type="button" onclick="setTab('disabled')" id="tab-disabled" class="px-4 py-1.5 text-sm font-medium rounded-md transition-all">Disabled</button>
+                    </div>
                 </div>
                 <div class="overflow-x-auto">
                     <table class="min-w-full divide-y divide-gray-200">
                         <thead class="bg-gray-50">
                             <tr>
                                 <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Name</th>
-                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Schedule</th>
+                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase" id="th-schedule">Schedule</th>
                                 <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
-                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Next Run</th>
+                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase" id="th-next-run">Next Run</th>
+                                <th class="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase" id="th-action">Action</th>
                             </tr>
                         </thead>
                         <tbody class="bg-white divide-y divide-gray-200" id="jobs-tbody">
-                            <tr><td colspan="4" class="px-6 py-4 text-center text-sm text-gray-500 animate-pulse-slow">Loading jobs...</td></tr>
+                            <tr><td colspan="5" class="px-6 py-4 text-center text-sm text-gray-500 animate-pulse-slow">Loading jobs...</td></tr>
                         </tbody>
                     </table>
                 </div>
@@ -75,22 +96,58 @@
     </main>
 
     <!-- Modal for execution details -->
-    <div id="modal" class="fixed inset-0 bg-gray-500/75 hidden flex items-center justify-center z-50">
-        <div class="bg-white rounded-lg shadow-xl w-11/12 md:w-3/4 max-w-4xl max-h-[90vh] flex flex-col">
-            <div class="px-6 py-4 border-b border-gray-200 flex justify-between items-center">
-                <h3 class="text-lg font-medium text-gray-900">Execution Logs</h3>
-                <button onclick="document.getElementById('modal').classList.add('hidden')" class="text-gray-400 hover:text-gray-500">
+    <div id="modal" class="fixed inset-0 bg-black/60 hidden flex items-center justify-center z-50 p-4">
+        <div class="bg-white rounded-xl shadow-2xl w-full max-w-4xl max-h-[90vh] flex flex-col overflow-hidden">
+            <div class="px-6 py-4 border-b border-gray-100 flex justify-between items-center bg-gray-50">
+                <h3 class="text-lg font-bold text-gray-900">Execution Logs</h3>
+                <button type="button" onclick="closeModal('modal')" class="text-gray-400 hover:text-gray-600 transition-colors p-1">
                     <svg class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" /></svg>
                 </button>
             </div>
-            <div class="p-6 bg-gray-900 text-gray-100 font-mono text-sm overflow-y-auto flex-1 whitespace-pre-wrap" id="modal-content">
+            <div class="p-6 bg-gray-900 text-gray-100 font-mono text-sm overflow-y-auto flex-1 whitespace-pre-wrap selection:bg-indigo-500/30" id="modal-content">
                 Loading...
             </div>
         </div>
     </div>
 
+    <!-- Confirm Modal -->
+    <div id="confirm-modal" class="fixed inset-0 bg-black/60 hidden flex items-center justify-center z-[60] p-4">
+        <div class="bg-white rounded-xl shadow-2xl w-full max-w-md transform transition-all">
+            <div class="p-6">
+                <h3 class="text-lg font-bold text-gray-900 mb-2" id="confirm-title">Are you sure?</h3>
+                <p class="text-gray-500 text-sm" id="confirm-message">This action cannot be undone.</p>
+            </div>
+            <div class="px-6 py-4 bg-gray-50 flex flex-row-reverse gap-3 rounded-b-xl">
+                <button type="button" id="confirm-yes" class="px-4 py-2 bg-indigo-600 text-white text-sm font-medium rounded-lg hover:bg-indigo-700 transition-colors">Confirm</button>
+                <button type="button" onclick="closeModal('confirm-modal')" class="px-4 py-2 bg-white border border-gray-200 text-gray-700 text-sm font-medium rounded-lg hover:bg-gray-50 transition-colors">Cancel</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Auth Modal -->
+    <div id="auth-modal" class="fixed inset-0 bg-black/60 hidden flex items-center justify-center z-[70] p-4">
+        <form id="auth-form" class="bg-white rounded-xl shadow-2xl w-full max-w-sm overflow-hidden">
+            <div class="p-6">
+                <div class="w-12 h-12 bg-indigo-100 text-indigo-600 rounded-full flex items-center justify-center mb-4 mx-auto">
+                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/></svg>
+                </div>
+                <h3 class="text-lg font-bold text-gray-900 text-center mb-1">Access Required</h3>
+                <p class="text-gray-500 text-sm text-center mb-6">Please enter your API Token to continue.</p>
+                <input type="password" autocomplete="current-password" id="auth-token-input" class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition-all" placeholder="Token ID">
+            </div>
+            <div class="px-6 py-4 bg-gray-50 flex flex-col gap-2">
+                <button type="submit" id="auth-submit" class="w-full px-4 py-2 bg-indigo-600 text-white text-sm font-medium rounded-lg hover:bg-indigo-700 transition-colors">Verify</button>
+                <button type="button" onclick="closeModal('auth-modal')" class="w-full px-4 py-2 bg-transparent text-gray-500 text-sm font-medium rounded-lg hover:text-gray-700 transition-colors">Cancel</button>
+            </div>
+        </form>
+    </div>
+
+    <!-- Toast Container -->
+    <div id="toast-container" class="fixed bottom-6 right-6 flex flex-col gap-3 z-[100]"></div>
+
     <script>
         let currentJob = null;
+        let activeTab = 'enabled';
 
         function formatTime(isoString) {
             if (!isoString) return 'N/A';
@@ -111,13 +168,191 @@
             return Object.keys(statusObj)[0];
         }
 
-        async function fetchAPI(endpoint) {
+        function showToast(message, type = 'success', duration = 3000, action = null) {
+            const container = document.getElementById('toast-container');
+            const toast = document.createElement('div');
+            let colorClass = 'bg-gray-900';
+            if (type === 'error') colorClass = 'bg-red-600';
+            if (type === 'info') colorClass = 'bg-blue-600';
+            if (type === 'success') colorClass = 'bg-green-600';
+            
+            toast.className = `${colorClass} text-white px-5 py-3 rounded-xl shadow-2xl flex items-center gap-3 transform transition-all duration-300 translate-y-10 opacity-0 min-w-[300px]`;
+            let innerHTML = `<span class="text-sm font-medium flex-1">${message}</span>`;
+            if (action) {
+                innerHTML += `<button type="button" class="text-xs font-semibold px-2 py-1 bg-white/20 hover:bg-white/30 rounded transition-colors whitespace-nowrap" onclick="${action.onclick}">${action.text}</button>`;
+            }
+            toast.innerHTML = innerHTML;
+            
+            container.appendChild(toast);
+            
+            // Force a reflow
+            toast.offsetHeight;
+            
+            setTimeout(() => {
+                toast.classList.remove('translate-y-10', 'opacity-0');
+            }, 50);
+            
+            const close = () => {
+                toast.classList.add('opacity-0', 'translate-y-2');
+                setTimeout(() => toast.remove(), 300);
+            };
+
+            if (duration !== Infinity) {
+                setTimeout(close, duration);
+            }
+
+            return { close };
+        }
+
+        function openModal(id) {
+            const el = document.getElementById(id);
+            el.classList.remove('hidden');
+            el.classList.add('flex');
+        }
+
+        function closeModal(id) {
+            const el = document.getElementById(id);
+            el.classList.add('hidden');
+            el.classList.remove('flex');
+        }
+
+        function customConfirm(title, message) {
+            return new Promise((resolve) => {
+                document.getElementById('confirm-title').innerText = title;
+                document.getElementById('confirm-message').innerText = message;
+                openModal('confirm-modal');
+                
+                const btn = document.getElementById('confirm-yes');
+                const cleanHandler = (val) => {
+                    closeModal('confirm-modal');
+                    btn.onclick = null;
+                    resolve(val);
+                };
+                
+                btn.onclick = () => cleanHandler(true);
+            });
+        }
+
+        async function requestToken() {
+            return new Promise((resolve) => {
+                const input = document.getElementById('auth-token-input');
+                const form = document.getElementById('auth-form');
+                input.value = '';
+                openModal('auth-modal');
+                input.focus();
+
+                const handler = (e) => {
+                    e.preventDefault();
+                    const val = input.value.trim();
+                    if (val) {
+                        localStorage.setItem('fc_runtime_id', val);
+                        closeModal('auth-modal');
+                        form.onsubmit = null;
+                        resolve(true);
+                    }
+                };
+                form.onsubmit = handler;
+            });
+        }
+
+        async function fetchAPI(endpoint, options = {}, isRetry = false) {
+            const headers = { ...options.headers };
+            const token = localStorage.getItem('fc_runtime_id');
+            if (token) {
+                headers['Runtime-Id'] = token;
+            }
+
             try {
-                const res = await fetch(endpoint);
+                const res = await fetch(endpoint, { ...options, headers });
+                
+                if (res.status === 401 && !isRetry) {
+                    if (await requestToken()) {
+                        return await fetchAPI(endpoint, options, true);
+                    }
+                }
+
+                if (!res.ok) {
+                    return { error: true, status: res.status };
+                }
+
                 return await res.json();
             } catch (err) {
                 console.error(`Error fetching ${endpoint}:`, err);
-                return null;
+                return { error: true, message: err.message };
+            }
+        }
+
+        function setTab(tab) {
+            activeTab = tab;
+            updateTabStyles();
+            updateDashboard();
+        }
+
+        function updateTabStyles() {
+            const btnEnabled = document.getElementById('tab-enabled');
+            const btnDisabled = document.getElementById('tab-disabled');
+            const thAction = document.getElementById('th-action');
+            const thNextRun = document.getElementById('th-next-run');
+            const thSchedule = document.getElementById('th-schedule');
+
+            if (activeTab === 'enabled') {
+                btnEnabled.className = "px-4 py-1.5 text-sm font-medium rounded-md bg-white shadow-sm text-indigo-600 transition-all cursor-pointer";
+                btnDisabled.className = "px-4 py-1.5 text-sm font-medium rounded-md text-gray-600 hover:text-gray-900 transition-all cursor-pointer";
+                if (thAction) thAction.classList.add('hidden');
+                if (thNextRun) thNextRun.classList.remove('hidden');
+                if (thSchedule) thSchedule.classList.remove('hidden');
+            } else {
+                btnEnabled.className = "px-4 py-1.5 text-sm font-medium rounded-md text-gray-600 hover:text-gray-900 transition-all cursor-pointer";
+                btnDisabled.className = "px-4 py-1.5 text-sm font-medium rounded-md bg-white shadow-sm text-indigo-600 transition-all cursor-pointer";
+                if (thAction) thAction.classList.remove('hidden');
+                if (thNextRun) thNextRun.classList.add('hidden');
+                if (thSchedule) thSchedule.classList.add('hidden');
+            }        }
+
+        async function pollJobStatus(name, execId, attempts = 0) {
+            if (attempts > 300) return; // give up after 5 mins
+
+            const exec = await fetchAPI(`/api/history/${execId}`);
+            if (exec && !exec.error) {
+                const statusName = getStatusName(exec.status);
+                if (statusName !== 'Running' && statusName !== 'Pending') {
+                    const success = statusName === 'Success';
+                    const msg = `Job "${name}" ${success ? 'completed successfully' : 'failed'}`;
+                    
+                    showToast(msg, success ? 'success' : 'error', 8000, {
+                        text: 'View Logs',
+                        onclick: `showLogs('${execId}')`
+                    });
+
+                    updateDashboard();
+                    return;
+                }
+            }
+            
+            setTimeout(() => pollJobStatus(name, execId, attempts + 1), 1000);
+        }
+
+        async function triggerJob(e, name) {
+            e.preventDefault();
+            e.stopPropagation();
+            if (!await customConfirm('Trigger Job', `Execute "${name}" immediately?`)) return;
+            
+            try {
+                const res = await fetchAPI(`/api/jobs/${encodeURIComponent(name)}/trigger`, { method: 'POST' });
+                
+                if (res && !res.error && res.status === 'triggered') {
+                    showToast(`Job "${name}" triggered. Waiting for completion...`, 'info');
+                    updateDashboard();
+                    if (res.execution_id) {
+                        pollJobStatus(name, res.execution_id);
+                    }
+                } else if (res && res.status === 401) {
+                    showToast("Unauthorized Access", "error");
+                } else {
+                    showToast(`Failed to trigger "${name}"`, "error");
+                }
+            } catch (err) {
+                showToast("Connection Error", "error");
             }
         }
 
@@ -126,8 +361,9 @@
             const jobs = await fetchAPI('/api/jobs');
             
             document.getElementById('last-updated').innerText = `Updated: ${new Date().toLocaleTimeString()}`;
+            updateTabStyles();
 
-            if (status) {
+            if (status && !status.error) {
                 const sr = status.total_executions ? ((status.total_executions - status.total_failures) / status.total_executions * 100).toFixed(1) : 100;
                 document.getElementById('stats-container').innerHTML = `
                     <div class="bg-white rounded-lg shadow p-6 border-t-4 border-indigo-500">
@@ -147,50 +383,97 @@
                         <div class="mt-1 text-3xl font-semibold text-gray-900">${sr}%</div>
                     </div>
                 `;
+            } else if (!status) {
+                 document.getElementById('stats-container').innerHTML = Array(4).fill(0).map(() => `
+                    <div class="bg-white rounded-lg shadow p-6 border-t-4 border-gray-100">
+                        <div class="h-4 w-1/3 skeleton rounded mb-2"></div>
+                        <div class="h-8 w-2/3 skeleton rounded"></div>
+                    </div>
+                `).join('');
             }
 
-            if (jobs) {
+            if (jobs && !jobs.error) {
                 const tbody = document.getElementById('jobs-tbody');
                 tbody.innerHTML = '';
-                // Sort jobs by name
-                jobs.sort((a, b) => a.name.localeCompare(b.name)).forEach(job => {
-                    const isRunning = job.is_running;
-                    const statusName = job.last_status ? getStatusName(job.last_status) : null;
-                    const statusColor = isRunning ? 'bg-blue-100 text-blue-800 border-blue-200' : 
-                                      (statusName === 'Success' ? 'bg-green-100 text-green-800 border-green-200' : 
-                                      (statusName ? 'bg-red-100 text-red-800 border-red-200' : 'bg-gray-100 text-gray-800 border-gray-200'));
-                    const statusText = isRunning ? 'Running' : (statusName || 'Idle');
-                    
-                    const tr = document.createElement('tr');
-                    tr.className = `hover:bg-gray-50 cursor-pointer transition-colors ${currentJob === job.name ? 'bg-indigo-50' : ''}`;
-                    tr.onclick = () => loadHistory(job.name);
-                    tr.innerHTML = `
-                        <td class="px-6 py-4 whitespace-nowrap font-medium text-gray-900">${job.name}</td>
-                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500 font-mono">${job.schedule}</td>
-                        <td class="px-6 py-4 whitespace-nowrap">
-                            <span class="px-2.5 py-0.5 inline-flex text-xs leading-5 font-semibold rounded-full border ${statusColor}">
-                                ${statusText}
-                            </span>
-                        </td>
-                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">${formatTime(job.next_run)}</td>
-                    `;
-                    tbody.appendChild(tr);
-                });
+                
+                const filteredJobs = jobs.filter(job => activeTab === 'enabled' ? job.enabled : !job.enabled);
+                
+                if (filteredJobs.length === 0) {
+                    tbody.innerHTML = `<tr><td colspan="5" class="px-6 py-10 text-center text-sm text-gray-500 italic">No ${activeTab} jobs found.</td></tr>`;
+                } else {
+                    filteredJobs.sort((a, b) => a.name.localeCompare(b.name)).forEach(job => {
+                        const isRunning = job.is_running;
+                        const statusName = job.last_status ? getStatusName(job.last_status) : null;
+                        const statusColor = isRunning ? 'bg-blue-100 text-blue-800 border-blue-200' : 
+                                          (statusName === 'Success' ? 'bg-green-100 text-green-800 border-green-200' : 
+                                          (statusName ? 'bg-red-100 text-red-800 border-red-200' : 'bg-gray-100 text-gray-800 border-gray-200'));
+                        const statusText = isRunning ? 'Running' : (statusName || 'Idle');
+                        
+                        const tr = document.createElement('tr');
+                        tr.className = `hover:bg-gray-50 cursor-pointer transition-colors ${currentJob === job.name ? 'bg-indigo-50' : ''}`;
+                        tr.onclick = () => loadHistory(job.name);
+                        
+                        let extraCell = '';
+                        let scheduleCell = '';
+                        if (activeTab === 'enabled') {
+                            scheduleCell = `<td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500 font-mono">${job.schedule}</td>`;
+                            extraCell = `<td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">${formatTime(job.next_run)}</td>`;
+                        } else {
+                            extraCell = `
+                                <td class="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
+                                    <button type="button" onclick="triggerJob(event, '${job.name}')" class="text-indigo-600 hover:text-indigo-900 bg-indigo-50 hover:bg-indigo-100 px-3 py-1 rounded-md transition-colors cursor-pointer">
+                                        Run
+                                    </button>
+                                </td>
+                            `;
+                        }
+
+                        tr.innerHTML = `
+                            <td class="px-6 py-4 whitespace-nowrap font-medium text-gray-900">${job.name}</td>
+                            ${scheduleCell}
+                            <td class="px-6 py-4 whitespace-nowrap">
+                                <span class="px-2.5 py-0.5 inline-flex text-xs leading-5 font-semibold rounded-full border ${statusColor}">
+                                    ${statusText}
+                                </span>
+                            </td>
+                            ${extraCell}
+                        `;
+                        tbody.appendChild(tr);
+                    });
+                }
+            } else if (!jobs) {
+                const tbody = document.getElementById('jobs-tbody');
+                tbody.innerHTML = Array(5).fill(0).map(() => `
+                    <tr>
+                        <td class="px-6 py-4"><div class="h-4 w-24 skeleton rounded"></div></td>
+                        ${activeTab === 'enabled' ? '<td class="px-6 py-4"><div class="h-4 w-20 skeleton rounded"></div></td>' : ''}
+                        <td class="px-6 py-4"><div class="h-5 w-16 skeleton rounded-full"></div></td>
+                        <td class="px-6 py-4"><div class="h-4 w-32 skeleton rounded"></div></td>
+                    </tr>
+                `).join('');
             }
             
             if (currentJob) loadHistory(currentJob, true);
-            else loadHistory(null, true); // load global history
+            else loadHistory(null, true);
         }
 
         async function loadHistory(jobName, silent = false) {
             currentJob = jobName;
             document.getElementById('history-title').innerText = jobName ? `History: ${jobName}` : 'Recent Global History';
-            if (!silent) document.getElementById('history-container').innerHTML = '<div class="p-6 text-center text-sm text-gray-500 animate-pulse-slow">Loading history...</div>';
-            
-            const data = await fetchAPI(`/api/history${jobName ? '?job_name=' + encodeURIComponent(jobName) : ''}`);
-            if (!data || !data.history) return;
             
             const container = document.getElementById('history-container');
+            if (!silent) {
+                container.innerHTML = Array(6).fill(0).map(() => `
+                    <div class="p-4 border-b border-gray-100 bg-white">
+                        <div class="flex justify-between mb-2"><div class="h-4 w-1/3 skeleton rounded"></div><div class="h-3 w-1/4 skeleton rounded"></div></div>
+                        <div class="h-3 w-1/2 skeleton rounded"></div>
+                    </div>
+                `).join('');
+            }
+            
+            const data = await fetchAPI(`/api/history${jobName ? '?job_name=' + encodeURIComponent(jobName) : ''}`);
+            if (!data || data.error || !data.history) return;
+            
             if (data.history.length === 0) {
                 container.innerHTML = '<div class="p-6 text-center text-sm text-gray-500">No history found</div>';
                 return;
@@ -200,28 +483,42 @@
             data.history.forEach(h => {
                 const statusName = getStatusName(h.status);
                 const success = statusName === 'Success';
+                const trigger = (h.trigger || 'cron').toUpperCase();
+                
                 const div = document.createElement('div');
-                div.className = `p-4 border-b border-gray-200 hover:bg-gray-100 cursor-pointer border-l-4 ${success ? 'border-l-green-500' : 'border-l-red-500'} bg-white`;
+                div.className = `p-4 border-b border-gray-200 hover:bg-gray-100 cursor-pointer border-l-4 ${success ? 'border-l-green-500' : 'border-l-red-500'} bg-white group`;
                 div.onclick = () => showLogs(h.id);
                 div.innerHTML = `
-                    <div class="flex justify-between items-center mb-1">
-                        <span class="font-bold text-sm text-gray-900">${h.job_name}</span>
-                        <span class="text-xs text-gray-500">${formatDuration(h.started_at, h.ended_at)}</span>
+                    <div class="flex justify-between items-start mb-1">
+                        <div class="flex flex-col gap-1">
+                            <span class="font-bold text-sm text-gray-900">${h.job_name}</span>
+                            <div class="flex items-center gap-2">
+                                <span class="bg-gray-100 text-gray-500 px-1.5 py-0.5 rounded text-[10px] font-bold tracking-wider">${trigger}</span>
+                                <span class="text-[11px] text-gray-400">${formatTime(h.started_at)}</span>
+                            </div>
+                        </div>
+                        <span class="text-[11px] font-medium text-gray-400 group-hover:text-gray-600 transition-colors">${formatDuration(h.started_at, h.ended_at)}</span>
                     </div>
-                    <div class="text-xs text-gray-500">${formatTime(h.started_at)}</div>
                 `;
                 container.appendChild(div);
             });
         }
 
+        async function logout() {
+            if (await customConfirm('Logout', 'Are you sure you want to clear your API token?')) {
+                localStorage.removeItem('fc_runtime_id');
+                window.location.reload();
+            }
+        }
+
         async function showLogs(id) {
             const modal = document.getElementById('modal');
             const content = document.getElementById('modal-content');
-            modal.classList.remove('hidden');
+            openModal('modal');
             content.innerHTML = 'Loading...';
             
             const exec = await fetchAPI(`/api/history/${id}`);
-            if (exec) {
+            if (exec && !exec.error) {
                 const statusName = getStatusName(exec.status);
                 let logs = `Job: ${exec.job_name}\nID: ${exec.id}\nStatus: ${statusName}\nDuration: ${formatDuration(exec.started_at, exec.ended_at)}\n`;
                 

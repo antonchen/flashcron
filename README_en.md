@@ -204,6 +204,7 @@ log_level = "info"           # trace, debug, info, warn, error
 json_logs = false            # JSON format for log aggregators
 api_host = "0.0.0.0"       # Web Dashboard / API host
 api_port = 8080              # Web Dashboard / API port
+api_token = "secret"         # API Auth Token (random UUID if not set, printed on startup)
 max_concurrent_jobs = 10     # 0 = unlimited
 shell = "/bin/sh"            # Default shell
 watch_config = true          # Hot reload on config changes
@@ -418,7 +419,7 @@ MIT License - see [LICENSE](LICENSE) for details.
 **This is a fork of the original [flashcron](https://github.com/alfredo-baratta/flashcron) project with significant modifications and improvements.**
 
 *   **Original Author:** Alfredo Baratta ([alfredobaratta@outlook.com](mailto:alfredobaratta@outlook.com))
-*   **Current Maintainer:**  ([Anton Chen](https://github.com/antonchen))
+*   **Current Maintainer:**  [Anton Chen](https://github.com/antonchen)
 
 ---
 

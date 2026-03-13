@@ -14,7 +14,7 @@
 
 ---
 
-## Fork 版本增强功能
+## Fork 新功能
 本版本是基于 **v0.1.0** 的增强分支，新增了以下核心特性：
 
 - **内置 Web 控制台**：轻量级监控界面，可实时追踪任务状态、成功率及执行历史（包含 RESTful API）。
@@ -203,6 +203,7 @@ log_level = "info"           # trace, debug, info, warn, error
 json_logs = false            # 适配日志采集器的 JSON 格式
 api_host = "0.0.0.0"       # Web 控制台 / API 主机
 api_port = 8080              # Web 控制台 / API 端口
+api_token = "secret"         # API 鉴权 Token (若未设置将随机生成并在启动时打印)
 max_concurrent_jobs = 10     # 0 = 不限制
 shell = "/bin/sh"            # 默认 Shell
 watch_config = true          # 配置文件变更热加载
@@ -352,7 +353,7 @@ cargo build --release
 **本项目是原 [flashcron](https://github.com/alfredo-baratta/flashcron) 项目的增强分支，进行了大量修改。**
 
 *   **原作者：** Alfredo Baratta ([alfredobaratta@outlook.com](mailto:alfredobaratta@outlook.com))
-*   **当前维护者：**  ([Anton Chen](https://github.com/antonchen))
+*   **当前维护者：**  [Anton Chen](https://github.com/antonchen)
 
 ---
 

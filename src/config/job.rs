@@ -7,10 +7,12 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::str::FromStr;
+use std::sync::Arc;
 use uuid::Uuid;
 
 /// Job definition
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Job {
     /// Cron schedule expression (standard 5-field format)
     pub schedule: String,
@@ -50,13 +52,9 @@ pub struct Job {
     #[serde(default = "default_retry_delay")]
     pub retry_delay: u64,
 
-    /// User to run the job as (Unix only)
+    /// User to run the job as when FlashCron runs as root; defaults to nobody (Linux only)
     #[serde(default)]
     pub user: Option<String>,
-
-    /// Whether to capture and log stdout/stderr
-    #[serde(default = "default_capture_output")]
-    pub capture_output: bool,
 
     /// Maximum output size to capture in bytes
     #[serde(default = "default_max_output")]
@@ -73,6 +71,10 @@ pub struct Job {
     /// Whether to print output (overrides global setting)
     #[serde(default)]
     pub print_output: Option<bool>,
+
+    /// Parsed cron schedule cached at config load time.
+    #[serde(skip, default)]
+    pub(crate) compiled_schedule: Option<Arc<Schedule>>,
 }
 
 fn default_enabled() -> bool {
@@ -83,10 +85,6 @@ fn default_retry_delay() -> u64 {
     60
 }
 
-fn default_capture_output() -> bool {
-    true
-}
-
 fn default_max_output() -> usize {
     1024 * 1024 // 1MB
 }
@@ -95,7 +93,7 @@ impl Job {
     /// Validate the job configuration
     pub fn validate(&self, name: &str) -> Result<()> {
         // Validate cron expression
-        self.parse_schedule().map_err(|e| Error::CronParse {
+        self.ensure_schedule_valid().map_err(|e| Error::CronParse {
             expr: self.schedule.clone(),
             reason: e,
         })?;
@@ -106,27 +104,75 @@ impl Job {
         }
 
         // Validate working directory exists if specified
-        if let Some(ref dir) = self.working_dir {
+        if let Some(dir) = &self.working_dir {
             if !dir.exists() {
                 warn!(
                     job_name = name,
+                    status = "working directory does not exist",
                     working_dir = &*dir.display().to_string();
-                    "Working directory does not exist"
+                    ""
                 );
+            }
+        }
+
+        if let Some(ref user) = self.user {
+            match nix::unistd::User::from_name(user) {
+                Ok(Some(_)) => {}
+                Ok(None) => {
+                    return Err(Error::config(format!(
+                        "Job '{}' references unknown Unix user '{}'",
+                        name, user
+                    )));
+                }
+                Err(source) => {
+                    return Err(Error::config(format!(
+                        "Failed to resolve Unix user '{}' for job '{}': {}",
+                        user, name, source
+                    )));
+                }
             }
         }
 
         Ok(())
     }
 
+    /// Compile and cache the cron schedule.
+    pub fn compile_schedule(&mut self) -> std::result::Result<(), String> {
+        let schedule = Self::parse_schedule_expression(&self.schedule)?;
+        self.compiled_schedule = Some(Arc::new(schedule));
+        Ok(())
+    }
+
+    /// Ensure the schedule expression is valid, using the cached form if present.
+    pub fn ensure_schedule_valid(&self) -> std::result::Result<(), String> {
+        if self.compiled_schedule.is_some() {
+            Ok(())
+        } else {
+            Self::parse_schedule_expression(&self.schedule).map(|_| ())
+        }
+    }
+
     /// Parse the cron schedule
     pub fn parse_schedule(&self) -> std::result::Result<Schedule, String> {
-        let parts: Vec<&str> = self.schedule.split_whitespace().collect();
+        self.with_schedule(|schedule| schedule.clone())
+    }
+
+    fn with_schedule<T>(&self, f: impl FnOnce(&Schedule) -> T) -> std::result::Result<T, String> {
+        if let Some(ref schedule) = self.compiled_schedule {
+            Ok(f(schedule.as_ref()))
+        } else {
+            let schedule = Self::parse_schedule_expression(&self.schedule)?;
+            Ok(f(&schedule))
+        }
+    }
+
+    fn parse_schedule_expression(expr: &str) -> std::result::Result<Schedule, String> {
+        let parts: Vec<&str> = expr.split_whitespace().collect();
 
         let mut expr = if parts.len() == 5 {
-            format!("0 {}", self.schedule)
+            format!("0 {}", expr)
         } else {
-            self.schedule.clone()
+            expr.to_string()
         };
 
         // The cron crate requires Day of Week (field 6) to use names (Sun, Mon, etc.) or 1-7 (Sun-Sat)
@@ -187,9 +233,9 @@ impl Job {
 
     /// Get the next scheduled run time
     pub fn next_run<Tz: chrono::TimeZone>(&self, tz: Tz) -> Option<chrono::DateTime<Tz>> {
-        self.parse_schedule()
+        self.with_schedule(|schedule| schedule.upcoming(tz).next())
             .ok()
-            .and_then(|schedule| schedule.upcoming(tz).next())
+            .flatten()
     }
 
     /// Get the retry policy
@@ -220,11 +266,11 @@ impl Default for Job {
             retry_count: 0,
             retry_delay: 60,
             user: None,
-            capture_output: true,
             max_output_size: 1024 * 1024,
             run_on_startup: false,
             tags: Vec::new(),
             print_output: None,
+            compiled_schedule: None,
         }
     }
 }
@@ -285,6 +331,9 @@ pub struct JobExecution {
     pub id: Uuid,
     /// Job name
     pub job_name: String,
+    /// Trigger source (cron, manual, startup)
+    #[serde(default = "default_trigger")]
+    pub trigger: String,
     /// Start time
     pub started_at: chrono::DateTime<chrono::Utc>,
     /// End time (if completed)
@@ -293,37 +342,42 @@ pub struct JobExecution {
     pub status: JobStatus,
     /// Exit code (if available)
     pub exit_code: Option<i32>,
-    /// Captured stdout
-    pub stdout: Option<String>,
-    /// Captured stderr
-    pub stderr: Option<String>,
+    /// Captured merged stdout/stderr output
+    pub output: Option<String>,
     /// Retry attempt number
     pub attempt: u32,
 }
 
+fn default_trigger() -> String {
+    "unknown".to_string()
+}
+
+fn normalize_output(output: Option<String>) -> Option<String> {
+    output.filter(|output| !output.is_empty())
+}
+
 impl JobExecution {
     /// Create a new job execution record
-    pub fn new(job_name: impl Into<String>) -> Self {
+    pub fn new(job_name: impl Into<String>, trigger: impl Into<String>) -> Self {
         Self {
             id: Uuid::new_v4(),
             job_name: job_name.into(),
+            trigger: trigger.into(),
             started_at: chrono::Utc::now(),
             ended_at: None,
             status: JobStatus::Running,
             exit_code: None,
-            stdout: None,
-            stderr: None,
+            output: None,
             attempt: 1,
         }
     }
 
     /// Mark execution as completed with success
-    pub fn complete_success(&mut self, exit_code: i32, stdout: String, stderr: String) {
+    pub fn complete_success(&mut self, exit_code: i32, output: Option<String>) {
         self.ended_at = Some(chrono::Utc::now());
         self.status = JobStatus::Success;
         self.exit_code = Some(exit_code);
-        self.stdout = Some(stdout);
-        self.stderr = Some(stderr);
+        self.output = normalize_output(output);
     }
 
     /// Mark execution as failed
@@ -331,14 +385,12 @@ impl JobExecution {
         &mut self,
         error: String,
         exit_code: Option<i32>,
-        stdout: String,
-        stderr: String,
+        output: Option<String>,
     ) {
         self.ended_at = Some(chrono::Utc::now());
         self.status = JobStatus::Failed { error };
         self.exit_code = exit_code;
-        self.stdout = Some(stdout);
-        self.stderr = Some(stderr);
+        self.output = normalize_output(output);
     }
 
     /// Mark execution as timed out
@@ -409,10 +461,10 @@ mod tests {
 
     #[test]
     fn test_job_execution() {
-        let mut exec = JobExecution::new("test-job");
+        let mut exec = JobExecution::new("test-job", "manual");
         assert!(exec.is_running());
 
-        exec.complete_success(0, "output".to_string(), "".to_string());
+        exec.complete_success(0, Some("output".to_string()));
         assert!(!exec.is_running());
         assert!(matches!(exec.status, JobStatus::Success));
         assert!(exec.duration().is_some());

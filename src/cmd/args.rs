@@ -7,8 +7,8 @@ use std::path::PathBuf;
 #[command(author, version, about, long_about = None)]
 pub struct Cli {
     /// Configuration file path
-    #[arg(short, long, default_value = "flashcron.toml", global = true)]
-    pub config: PathBuf,
+    #[arg(short, long, env = "FLASHCRON_CONFIG", global = true)]
+    pub config: Option<PathBuf>,
 
     /// Log level (trace, debug, info, warn, error)
     #[arg(short, long, global = true)]
@@ -26,9 +26,9 @@ pub struct Cli {
 pub enum Commands {
     /// Start the cron daemon
     Run {
-        /// Run in foreground (don't daemonize)
+        /// Run in background daemon mode
         #[arg(short, long)]
-        foreground: bool,
+        daemon: bool,
     },
 
     /// Validate configuration file
@@ -50,6 +50,9 @@ pub enum Commands {
         /// Job name to trigger
         job_name: String,
     },
+
+    /// Stop a running daemon
+    Stop,
 
     /// Generate default configuration file
     Init {
@@ -73,13 +76,12 @@ pub enum Commands {
     },
 
     /// Show job execution history
-    #[cfg(feature = "web")]
     History {
         /// Job name to filter by
         job_name: Option<String>,
 
         /// Limit number of records
-        #[arg(short, long, default_value = "20")]
+        #[arg(long, default_value = "20")]
         limit: usize,
 
         /// Query specific execution by ID

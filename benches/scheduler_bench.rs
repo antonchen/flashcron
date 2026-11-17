@@ -1,7 +1,8 @@
 //! Benchmarks for the scheduler
 
-use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
+use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
 use flashcron::{Config, Scheduler};
+use std::hint::black_box;
 use std::path::PathBuf;
 
 /// Benchmark scheduler initialization with varying job counts
@@ -16,7 +17,8 @@ fn bench_scheduler_init(c: &mut Criterion) {
                 let config = generate_config(count);
                 b.iter(|| {
                     let config = config.clone();
-                    let (scheduler, _handle) = Scheduler::new(config, PathBuf::from("bench.toml"));
+                    let (scheduler, _handle) =
+                        Scheduler::new(config, PathBuf::from("bench.toml"), None);
                     black_box(scheduler)
                 });
             },
@@ -57,7 +59,7 @@ fn bench_next_run(c: &mut Criterion) {
     let job = config.get_job("test").unwrap();
 
     c.bench_function("next_run_calculation", |b| {
-        b.iter(|| black_box(job.next_run()));
+        b.iter(|| black_box(job.next_run(chrono::Utc)));
     });
 }
 
@@ -69,7 +71,10 @@ fn generate_config(job_count: usize) -> Config {
 
 /// Generate config string with N jobs
 fn generate_config_string(job_count: usize) -> String {
-    let mut config = String::from("[settings]\nmax_concurrent_jobs = 100\n\n");
+    let mut config = format!(
+        "[settings]\nmax_concurrent_jobs = {}\n\n",
+        flashcron::config::DEFAULT_MAX_CONCURRENT_JOBS
+    );
 
     for i in 0..job_count {
         config.push_str(&format!(

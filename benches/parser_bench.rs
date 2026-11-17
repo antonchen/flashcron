@@ -1,7 +1,8 @@
 //! Benchmarks for cron expression parsing
 
-use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
+use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
 use cron::Schedule;
+use std::hint::black_box;
 use std::str::FromStr;
 
 /// Benchmark parsing various cron expressions
@@ -74,14 +75,17 @@ fn bench_multiple_occurrences(c: &mut Criterion) {
 
 /// Benchmark TOML parsing
 fn bench_toml_parse(c: &mut Criterion) {
-    let config_small = r#"
+    let config_small = format!(
+        r#"
         [settings]
-        log_level = "info"
+        log_level = "{}"
 
         [jobs.test]
         schedule = "* * * * *"
         command = "echo test"
-    "#;
+    "#,
+        flashcron::config::DEFAULT_LOG_LEVEL
+    );
 
     let config_medium = generate_config(50);
     let config_large = generate_config(200);
@@ -89,7 +93,7 @@ fn bench_toml_parse(c: &mut Criterion) {
     let mut group = c.benchmark_group("toml_parse");
 
     group.bench_function("small", |b| {
-        b.iter(|| toml::from_str::<toml::Value>(black_box(config_small)).unwrap());
+        b.iter(|| toml::from_str::<toml::Value>(black_box(&config_small)).unwrap());
     });
 
     group.bench_function("medium_50_jobs", |b| {
@@ -104,7 +108,10 @@ fn bench_toml_parse(c: &mut Criterion) {
 }
 
 fn generate_config(job_count: usize) -> String {
-    let mut config = String::from("[settings]\nlog_level = \"info\"\n\n");
+    let mut config = format!(
+        "[settings]\nlog_level = \"{}\"\n\n",
+        flashcron::config::DEFAULT_LOG_LEVEL
+    );
 
     for i in 0..job_count {
         config.push_str(&format!(

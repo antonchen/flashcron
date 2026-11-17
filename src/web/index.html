@@ -1,0 +1,1655 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="robots" content="noindex, nofollow">
+    <title data-i18n="FlashCron Dashboard">FlashCron Dashboard</title>
+    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+    <style type="text/tailwindcss">
+        :root {
+            --animate-pulse-slow: pulse-slow 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+        }
+
+        @keyframes pulse-slow {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+
+        .skeleton {
+            background: linear-gradient(90deg, #f0f0f0 25%, #f8f8f8 50%, #f0f0f0 75%);
+            background-size: 200% 100%;
+            animation: skeleton-loading 1.5s infinite;
+        }
+
+        @keyframes skeleton-loading {
+            0% { background-position: 200% 0; }
+            100% { background-position: -200% 0; }
+        }
+    </style>
+</head>
+<body class="bg-gray-100 min-h-screen font-sans flex flex-col">
+    <nav class="bg-indigo-600 text-white shadow-lg">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="flex min-h-16 flex-wrap items-center justify-between gap-3 py-2">
+                <div class="flex items-center gap-4">
+                    <svg class="h-8 w-8 text-indigo-200" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z" />
+                    </svg>
+                    <span class="font-bold text-xl tracking-wider">FlashCron</span>
+                </div>
+                <div class="flex items-center gap-3">
+                    <div class="flex items-center gap-1 rounded-md bg-indigo-700/70 p-1" aria-label="Dashboard pages" data-i18n-aria-label="Dashboard pages">
+                        <button type="button" id="nav-jobs" onclick="showDashboardView()" aria-current="page" class="rounded px-3 py-1.5 text-sm font-medium text-white bg-indigo-500" data-i18n="Jobs">Jobs</button>
+                        <button type="button" id="nav-scripts" onclick="toggleScripts()" class="rounded px-3 py-1.5 text-sm font-medium text-indigo-100 hover:bg-indigo-600 hover:text-white" data-i18n="Scripts">Scripts</button>
+                        <button type="button" id="nav-packages" onclick="showPackagesView()" class="__DEP_MANAGER_HIDDEN__ rounded px-3 py-1.5 text-sm font-medium text-indigo-100 hover:bg-indigo-600 hover:text-white" data-i18n="Packages">Packages</button>
+                    </div>
+                    <button type="button" id="auth-toggle" onclick="toggleAuthentication()" class="p-2 hover:bg-white/10 rounded-full transition-colors">
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"/></svg>
+                    </button>
+                </div>
+            </div>
+        </div>
+    </nav>
+
+    <main class="w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 flex-1">
+        <div id="dashboard-view">
+        <!-- Stats Row -->
+        <div class="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8" id="stats-container">
+            <!-- Populated by JS -->
+        </div>
+
+        <div class="flex flex-col md:flex-row gap-8">
+            <!-- Jobs Table -->
+            <div class="w-full md:w-2/3 bg-white rounded-lg shadow overflow-hidden">
+                <div class="px-6 py-4 border-b border-gray-200 bg-gray-50 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+                    <div class="flex items-center gap-2">
+                        <h2 class="text-lg font-medium text-gray-900" data-i18n="Scheduled Jobs">Scheduled Jobs</h2>
+                    </div>
+                    <div class="flex items-center gap-2">
+                        <div class="flex items-center gap-1 p-1 bg-gray-200 rounded-lg">
+                            <button type="button" onclick="setTab('enabled')" id="tab-enabled" class="px-4 py-1.5 text-sm font-medium rounded-md transition-all" data-i18n="Enabled">Enabled</button>
+                            <button type="button" onclick="setTab('disabled')" id="tab-disabled" class="px-4 py-1.5 text-sm font-medium rounded-md transition-all" data-i18n="Disabled">Disabled</button>
+                        </div>
+                        <button type="button" onclick="openJobEditor()" class="px-4 py-2 text-sm font-semibold rounded-md bg-indigo-600 text-white hover:bg-indigo-700 transition-colors" data-i18n="Create">Create</button>
+                    </div>
+                </div>
+                <div class="overflow-x-auto">
+                    <table class="min-w-full divide-y divide-gray-200">
+                        <thead class="bg-gray-50">
+                            <tr>
+                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase" data-i18n="Name">Name</th>
+                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase" id="th-schedule" data-i18n="Cron expression">Cron expression</th>
+                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase" data-i18n="Status">Status</th>
+                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase" id="th-next-run" data-i18n="Next Run">Next Run</th>
+                                <th class="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase" id="th-action" data-i18n="Action">Action</th>
+                            </tr>
+                        </thead>
+                        <tbody class="bg-white divide-y divide-gray-200" id="jobs-tbody">
+                            <tr><td colspan="5" class="px-6 py-4 text-center text-sm text-gray-500 animate-pulse-slow" data-i18n="Loading jobs...">Loading jobs...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <div class="w-full md:w-1/3 bg-white rounded-lg shadow overflow-hidden flex flex-col h-[600px]">
+                <div class="px-6 py-4 border-b border-gray-200 bg-gray-50">
+                    <h2 class="text-lg font-medium text-gray-900" id="history-title" data-i18n="Recent History">Recent History</h2>
+                </div>
+                <div class="p-2 overflow-y-auto flex-1 bg-gray-50" id="history-container">
+                    <div class="p-6 text-center text-sm text-gray-500" data-i18n="Select a job to view history">Select a job to view history</div>
+                </div>
+            </div>
+        </div>
+
+        </div>
+
+        <section id="packages-view" class="hidden">
+        <!-- Dependency Management -->
+        <div id="dep-manager-panel" class="__DEP_MANAGER_HIDDEN__ mt-8 w-full bg-white rounded-lg shadow overflow-hidden">
+            <div class="px-6 py-4 border-b border-gray-200 bg-gray-50 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+                <h2 class="text-lg font-medium text-gray-900" data-i18n="Dependency Management">Dependency Management</h2>
+                <div class="flex gap-2">
+                    <button id="pkg-delete-selected" type="button" onclick="deleteSelectedPackages()" disabled class="px-3 py-1.5 rounded-md text-sm font-medium text-red-700 bg-red-50 hover:bg-red-100 disabled:opacity-50 disabled:cursor-not-allowed" data-i18n="Remove selected">Remove selected</button>
+                    <button type="button" onclick="openPackageSources()" class="px-3 py-1.5 rounded-md border border-gray-300 bg-white text-gray-700 text-sm hover:bg-gray-50" data-i18n="Package sources">Package sources</button>
+                    <button type="button" onclick="openPackageEditor()" class="px-3 py-1.5 rounded-md bg-indigo-600 text-white text-sm hover:bg-indigo-700" data-i18n="Add dependency">Add</button>
+                </div>
+            </div>
+            <div class="overflow-x-auto">
+                <table class="min-w-full divide-y divide-gray-200">
+                    <thead class="bg-gray-50">
+                        <tr>
+                            <th class="px-6 py-3 text-left"><input id="pkg-select-all" type="checkbox" aria-label="Select all packages" data-i18n-aria-label="Select all packages" onchange="selectAllPackages(this.checked)"></th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase" data-i18n="Type">Type</th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase" data-i18n="Name">Name</th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase" data-i18n="Target">Target</th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase" data-i18n="Current">Current</th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase" data-i18n="Status">Status</th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase" data-i18n="Error">Error</th>
+                            <th class="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase" data-i18n="Action">Action</th>
+                        </tr>
+                    </thead>
+                    <tbody class="bg-white divide-y divide-gray-200" id="pkgs-tbody">
+                        <tr><td colspan="8" class="px-6 py-4 text-center text-sm text-gray-500 animate-pulse-slow" data-i18n="Loading packages...">Loading packages...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+        </section>
+
+        <section id="scripts-view" class="hidden">
+            <div class="mt-8 overflow-x-auto bg-white rounded-md shadow">
+                <div class="flex items-center justify-between border-b border-gray-200 bg-gray-50 px-4 py-3">
+                    <h1 class="text-base font-semibold text-gray-900" data-i18n="Scripts">Scripts</h1>
+                    <button type="button" onclick="openScriptEditor()" class="px-3 py-1.5 rounded-md bg-indigo-600 text-white text-sm hover:bg-indigo-700" data-i18n="Add">Add</button>
+                </div>
+                <table class="min-w-full divide-y divide-gray-200">
+                    <thead class="bg-gray-50"><tr>
+                        <th class="px-4 py-3 text-left text-xs font-medium uppercase text-gray-500" data-i18n="Name">Name</th>
+                        <th class="px-4 py-3 text-left text-xs font-medium uppercase text-gray-500" data-i18n="Path">Path</th>
+                        <th class="px-4 py-3 text-right text-xs font-medium uppercase text-gray-500" data-i18n="Action">Action</th>
+                    </tr></thead>
+                    <tbody id="scripts-tbody" class="divide-y divide-gray-200">
+                        <tr><td colspan="3" class="px-4 py-6 text-center text-sm text-gray-500" data-i18n="No scripts">No scripts</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </section>
+    </main>
+
+    <footer class="pb-6 text-center text-xs text-gray-500" id="last-updated" data-i18n="Updating...">Updating...</footer>
+
+        <div id="package-sources" class="hidden fixed inset-0 bg-black/50 z-50 p-4 flex items-center justify-center" role="dialog" aria-modal="true" aria-labelledby="package-sources-title">
+        <div class="bg-white rounded-md shadow-xl w-full max-w-lg max-h-[90vh] overflow-y-auto p-6 space-y-4">
+            <div class="flex items-center justify-between">
+                <h2 id="package-sources-title" class="text-lg font-semibold" data-i18n="Package sources">Package sources</h2>
+                <button type="button" onclick="closeModal('package-sources')" aria-label="Close" data-i18n-aria-label="Close">×</button>
+            </div>
+            <div class="space-y-6">
+                <form id="apt-source-form" class="space-y-3">
+                    <label class="block text-sm"><span data-i18n="APT mirror">APT mirror</span><input id="apt-mirror-input" required class="mt-1 w-full border border-gray-300 rounded px-3 py-2 font-mono" placeholder="https://mirror.example"></label>
+                    <p class="text-xs text-gray-500" data-i18n="Only the mirror URL is required, e.g. http://mirrors.example.com. Debian sources only.">Only the mirror URL is required, e.g. http://mirrors.example.com. Debian sources only.</p>
+                    <button type="submit" class="px-3 py-1.5 rounded-md bg-indigo-600 text-white text-sm hover:bg-indigo-700" data-i18n="Save">Save</button>
+                </form>
+                <form id="pip-source-form" class="space-y-3">
+                    <label class="block text-sm"><span data-i18n="PIP index URL">PIP index URL</span><input id="pip-index-input" type="url" required class="mt-1 w-full border border-gray-300 rounded px-3 py-2 font-mono" placeholder="https://pypi.org/simple"></label>
+                    <button type="submit" class="px-3 py-1.5 rounded-md bg-indigo-600 text-white text-sm hover:bg-indigo-700" data-i18n="Save">Save</button>
+                </form>
+            </div>
+            <div class="flex justify-end"><button type="button" onclick="closeModal('package-sources')" class="px-3 py-2 border border-gray-300 rounded" data-i18n="Close">Close</button></div>
+        </div>
+    </div>
+
+    <div id="package-editor" class="hidden fixed inset-0 bg-black/50 z-50 p-4 flex items-center justify-center" role="dialog" aria-modal="true" aria-labelledby="package-editor-title">
+        <form id="package-form" class="bg-white rounded-md shadow-xl w-full max-w-lg max-h-[90vh] overflow-y-auto p-6 space-y-4">
+            <div class="flex items-center justify-between">
+                <h2 id="package-editor-title" class="text-lg font-semibold" data-i18n="Add packages">Add packages</h2>
+                <button type="button" onclick="closePackageEditor()" aria-label="Close" data-i18n-aria-label="Close">×</button>
+            </div>
+            <label class="block text-sm"><span data-i18n="Type">Type</span><select id="pkg-type-select" class="mt-1 w-full border border-gray-300 rounded px-3 py-2"><option value="APT">APT</option><option value="PIP">PIP</option></select></label>
+            <label id="pkg-add-fields" class="block text-sm"><span data-i18n="Packages (one per line: name or name=version)">Packages (one per line: name or name=version)</span><textarea id="pkg-name-input" required rows="6" class="mt-1 w-full border border-gray-300 rounded p-3 font-mono"></textarea></label>
+            <div id="pkg-edit-fields" class="hidden space-y-4">
+                <label class="block text-sm"><span data-i18n="Name">Name</span><input id="pkg-edit-name" readonly class="mt-1 w-full border border-gray-300 rounded px-3 py-2 bg-gray-50"></label>
+                <label class="block text-sm"><span data-i18n="Target">Target</span><input id="pkg-edit-target" class="mt-1 w-full border border-gray-300 rounded px-3 py-2 font-mono" placeholder="Latest" data-i18n-placeholder="Latest"></label>
+            </div>
+            <p id="package-form-error" class="hidden text-sm text-red-700" role="alert"></p>
+            <div class="flex justify-end gap-2">
+                <button type="button" onclick="closePackageEditor()" class="px-3 py-2 border border-gray-300 rounded" data-i18n="Cancel">Cancel</button>
+                <button id="pkg-add-btn" type="submit" class="px-3 py-2 bg-indigo-600 text-white rounded disabled:opacity-50" data-i18n="Apply">Apply</button>
+            </div>
+        </form>
+    </div>
+
+    <div id="job-editor" class="hidden fixed inset-0 bg-black/50 z-50 p-4 flex items-center justify-center">
+        <form id="job-form" class="bg-white rounded-md shadow-xl w-full max-w-4xl max-h-[90vh] overflow-y-auto p-6 space-y-4">
+            <div class="flex items-center justify-between">
+                <h2 id="job-editor-title" class="text-lg font-semibold" data-i18n="Add job">Add job</h2>
+                <button type="button" onclick="closeJobEditor()" aria-label="Close" data-i18n-aria-label="Close">×</button>
+            </div>
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <label class="text-sm"><span data-i18n="Name">Name</span><input id="job-name" required class="mt-1 w-full border border-gray-300 rounded px-3 py-2"></label>
+                <div class="text-sm">
+                    <div class="relative flex items-center gap-1">
+                        <label for="job-schedule" data-i18n="Cron expression">Cron expression</label>
+                        <span class="group inline-flex">
+                            <button type="button" class="inline-flex size-5 items-center justify-center rounded-full border border-gray-400 text-xs font-semibold text-gray-600 focus-visible:outline-2" aria-label="Cron expression help" data-i18n-aria-label="Cron expression help" aria-describedby="job-schedule-help">?</button>
+                            <span id="job-schedule-help" role="tooltip" class="invisible absolute left-0 top-full z-10 w-64 max-w-full rounded bg-gray-900 p-2 text-xs text-white group-hover:visible group-focus-within:visible" data-i18n="Five fields: minute, hour, day of month, month, day of week. For example, */5 * * * * runs every five minutes.">Five fields: minute, hour, day of month, month, day of week. For example, */5 * * * * runs every five minutes.</span>
+                        </span>
+                    </div>
+                    <input id="job-schedule" required placeholder="*/5 * * * *" class="mt-1 w-full border border-gray-300 rounded px-3 py-2 font-mono">
+                </div>
+                <label class="text-sm sm:col-span-2"><span data-i18n="Description">Description</span><input id="job-description" class="mt-1 w-full border border-gray-300 rounded px-3 py-2"></label>
+                <label class="text-sm sm:col-span-2"><span data-i18n="Existing script">Existing script</span><select id="job-script-select" class="mt-1 w-full border border-gray-300 rounded px-3 py-2" onchange="useSelectedScript()"><option value="" data-i18n="Select a script or enter a command below">Select a script or enter a command below</option></select></label>
+                <label class="text-sm sm:col-span-2"><span data-i18n="Command">Command</span><textarea id="job-command" required rows="5" class="mt-1 w-full border border-gray-300 rounded p-3 font-mono"></textarea></label>
+                <label class="text-sm"><span data-i18n="Working directory">Working directory</span><input id="job-working-dir" class="mt-1 w-full border border-gray-300 rounded px-3 py-2"></label>
+                <label class="text-sm"><span data-i18n="Timeout (seconds)">Timeout (seconds)</span><input id="job-timeout" type="number" min="0" class="mt-1 w-full border border-gray-300 rounded px-3 py-2"></label>
+                <label class="text-sm"><span data-i18n="Retry count">Retry count</span><input id="job-retry-count" type="number" min="0" class="mt-1 w-full border border-gray-300 rounded px-3 py-2"></label>
+                <label class="text-sm"><span data-i18n="Retry delay (seconds)">Retry delay (seconds)</span><input id="job-retry-delay" type="number" min="0" class="mt-1 w-full border border-gray-300 rounded px-3 py-2"></label>
+                <label class="text-sm"><span data-i18n="Shell">Shell</span><input id="job-shell" class="mt-1 w-full border border-gray-300 rounded px-3 py-2" placeholder="Use global shell" data-i18n-placeholder="Use global shell"></label>
+                <label class="text-sm"><span data-i18n="User">User</span><input id="job-user" class="mt-1 w-full border border-gray-300 rounded px-3 py-2" placeholder="Default: nobody when running as root" data-i18n-placeholder="Default: nobody when running as root"></label>
+                <label class="text-sm"><span data-i18n="Maximum output (bytes)">Maximum output (bytes)</span><input id="job-max-output" type="number" min="0" class="mt-1 w-full border border-gray-300 rounded px-3 py-2"></label>
+                <label class="text-sm"><span data-i18n="Log output">Log output</span><select id="job-print-output" class="mt-1 w-full border border-gray-300 rounded px-3 py-2"><option value="" data-i18n="Use global setting">Use global setting</option><option value="true" data-i18n="Enabled">Enabled</option><option value="false" data-i18n="Disabled">Disabled</option></select></label>
+                <label class="text-sm sm:col-span-2"><span data-i18n="Environment (one KEY=VALUE per line)">Environment (one KEY=VALUE per line)</span><textarea id="job-environment" rows="3" placeholder="KEY=value" class="mt-1 w-full border border-gray-300 rounded p-3 font-mono"></textarea></label>
+                <label class="text-sm sm:col-span-2"><span data-i18n="Tags (one per line)">Tags (one per line)</span><textarea id="job-tags" rows="2" class="mt-1 w-full border border-gray-300 rounded p-3"></textarea></label>
+                <label class="flex items-center gap-2 text-sm"><input id="job-enabled" type="checkbox"> <span data-i18n="Enabled">Enabled</span></label>
+                <label class="flex items-center gap-2 text-sm"><input id="job-run-on-startup" type="checkbox"> <span data-i18n="Run on startup">Run on startup</span></label>
+            </div>
+            <p id="job-form-error" class="hidden text-sm text-red-700" role="alert"></p>
+            <div class="flex justify-end gap-2">
+                <button type="button" onclick="closeJobEditor()" class="px-3 py-2 border border-gray-300 rounded" data-i18n="Cancel">Cancel</button>
+                <button type="submit" class="px-3 py-2 bg-indigo-600 text-white rounded" data-i18n="Save job">Save job</button>
+            </div>
+        </form>
+    </div>
+
+    <div id="script-editor" class="hidden fixed inset-0 bg-black/50 z-50 p-4 flex items-center justify-center">
+        <form id="script-form" class="bg-white rounded-md shadow-xl w-full max-w-3xl max-h-[90vh] overflow-y-auto p-6 space-y-4">
+            <div class="flex items-center justify-between">
+                <h2 id="script-editor-title" class="text-lg font-semibold" data-i18n="Add script">Add script</h2>
+                <button type="button" onclick="closeScriptEditor()" aria-label="Close" data-i18n-aria-label="Close">×</button>
+            </div>
+            <label class="block text-sm"><span data-i18n="Filename">Filename</span><input id="script-name" required class="mt-1 w-full border border-gray-300 rounded px-3 py-2"></label>
+            <label class="block text-sm"><span data-i18n="Script contents">Script contents</span><textarea id="script-content" required spellcheck="false" rows="18" class="mt-1 w-full border border-gray-300 rounded p-3 font-mono"></textarea></label>
+            <p id="script-form-error" class="hidden text-sm text-red-700" role="alert"></p>
+            <div class="flex justify-end gap-2">
+                <button type="button" onclick="closeScriptEditor()" class="px-3 py-2 border border-gray-300 rounded" data-i18n="Cancel">Cancel</button>
+                <button type="submit" class="px-3 py-2 bg-indigo-600 text-white rounded" data-i18n="Save executable script">Save executable script</button>
+            </div>
+        </form>
+    </div>
+
+    <!-- Modal for execution details -->
+    <div id="modal" class="fixed inset-0 bg-black/60 hidden flex items-center justify-center z-50 p-4">
+        <div class="bg-white rounded-xl shadow-2xl w-full max-w-4xl max-h-[90vh] flex flex-col overflow-hidden">
+            <div class="px-6 py-4 border-b border-gray-100 flex justify-between items-center bg-gray-50">
+                <h3 id="modal-title" class="text-lg font-bold text-gray-900" data-i18n="Execution Logs">Execution Logs</h3>
+                <button type="button" onclick="closeModal('modal')" class="text-gray-400 hover:text-gray-600 transition-colors p-1">
+                    <svg class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" /></svg>
+                </button>
+            </div>
+            <div class="p-6 bg-gray-900 text-gray-100 font-mono text-sm overflow-y-auto flex-1 whitespace-pre-wrap selection:bg-indigo-500/30" id="modal-content">
+                <span data-i18n="Loading...">Loading...</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- Confirm Modal -->
+    <div id="confirm-modal" class="fixed inset-0 bg-black/60 hidden flex items-center justify-center z-[60] p-4">
+        <div class="bg-white rounded-xl shadow-2xl w-full max-w-md transform transition-all">
+            <div class="p-6">
+                <h3 class="text-lg font-bold text-gray-900 mb-2" id="confirm-title" data-i18n="Are you sure?">Are you sure?</h3>
+                <p class="text-gray-500 text-sm" id="confirm-message" data-i18n="This action cannot be undone.">This action cannot be undone.</p>
+            </div>
+            <div class="px-6 py-4 bg-gray-50 flex flex-row-reverse gap-3 rounded-b-xl">
+                <button type="button" id="confirm-yes" class="px-4 py-2 bg-indigo-600 text-white text-sm font-medium rounded-lg hover:bg-indigo-700 transition-colors" data-i18n="Confirm">Confirm</button>
+                <button type="button" onclick="closeModal('confirm-modal')" class="px-4 py-2 bg-white border border-gray-200 text-gray-700 text-sm font-medium rounded-lg hover:bg-gray-50 transition-colors" data-i18n="Cancel">Cancel</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Auth Modal -->
+    <div id="auth-modal" class="fixed inset-0 bg-black/60 hidden flex items-center justify-center z-[70] p-4">
+        <form id="auth-form" class="bg-white rounded-xl shadow-2xl w-full max-w-sm overflow-hidden">
+            <div class="p-6">
+                <div class="w-12 h-12 bg-indigo-100 text-indigo-600 rounded-full flex items-center justify-center mb-4 mx-auto">
+                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/></svg>
+                </div>
+                <h3 class="text-lg font-bold text-gray-900 text-center mb-1" data-i18n="Access Required">Access Required</h3>
+                <p class="text-gray-500 text-sm text-center mb-6" data-i18n="Please enter your Token to continue.">Please enter your Token to continue.</p>
+                <input type="password" autocomplete="current-password" id="auth-token-input" aria-describedby="auth-error" class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition-all" placeholder="Token" data-i18n-placeholder="Token">
+            </div>
+            <div class="px-6 py-4 bg-gray-50 flex flex-col gap-2">
+                <p id="auth-error" class="hidden text-sm text-red-700" role="alert"></p>
+                <button type="submit" id="auth-submit" class="w-full px-4 py-2 bg-indigo-600 text-white text-sm font-medium rounded-lg hover:bg-indigo-700 transition-colors" data-i18n="Verify">Verify</button>
+                <button type="button" onclick="closeModal('auth-modal')" class="w-full px-4 py-2 bg-transparent text-gray-500 text-sm font-medium rounded-lg hover:text-gray-700 transition-colors" data-i18n="Cancel">Cancel</button>
+            </div>
+        </form>
+    </div>
+
+    <!-- Toast Container -->
+    <div id="toast-container" class="fixed bottom-6 right-6 flex flex-col gap-3 z-[100]"></div>
+
+    <script>
+        const locale = navigator.languages?.[0] || navigator.language || 'en';
+        const isChinese = /^zh(?:-|$)/i.test(locale);
+        const translations = {
+            "FlashCron Dashboard": "FlashCron 控制台",
+            "Jobs": "任务",
+            "Scripts": "脚本",
+            "Packages": "依赖",
+            "Scheduled Jobs": "计划任务",
+            "Enabled": "已启用",
+            "Disabled": "已禁用",
+            "Add": "创建",
+            "Create": "创建",
+            "Add dependency": "添加",
+            "Add script": "创建脚本",
+            "Name": "名称",
+            "Cron expression": "Cron 表达式",
+            "Cron expression help": "Cron 表达式说明",
+            "Five fields: minute, hour, day of month, month, day of week. For example, */5 * * * * runs every five minutes.": "按顺序填写 5 个字段：分钟、小时、日、月、星期，以空格分隔。例如，*/5 * * * * 表示每 5 分钟执行一次。",
+            "Status": "状态",
+            "Next Run": "下次运行",
+            "Action": "操作",
+            "Loading jobs...": "正在加载任务…",
+            "Recent History": "最近历史",
+            "Select a job to view history": "选择任务查看历史",
+            "Dependency Management": "依赖管理",
+            "Package sources": "软件源",
+            "APT mirror": "APT 镜像源",
+            "PIP index URL": "PIP 镜像地址",
+            "Only the mirror URL is required, e.g. http://mirrors.example.com. Debian sources only.": "仅需配置镜像源地址，例如 http://mirrors.example.com。仅支持 Debian 软件源。",
+            "Save": "保存",
+            "Remove selected": "移除所选",
+            "Type": "类型",
+            "Target": "目标版本",
+            "Current": "当前版本",
+            "Error": "错误",
+            "Loading packages...": "正在加载依赖…",
+            "Path": "路径",
+            "No scripts": "暂无脚本",
+            "Updating...": "正在更新…",
+            "Add packages": "添加依赖",
+            "Packages (one per line: name or name=version)": "依赖（每行填写一个依赖名或 依赖名=版本）",
+            "Cancel": "取消",
+            "Apply": "应用",
+            "Add job": "创建任务",
+            "Description": "描述",
+            "Existing script": "已有脚本",
+            "Select a script or enter a command below": "选择脚本，或在下方填写执行命令",
+            "Command": "命令",
+            "Working directory": "工作目录",
+            "Timeout (seconds)": "超时（秒）",
+            "Retry count": "重试次数",
+            "Retry delay (seconds)": "重试间隔（秒）",
+            "Shell": "Shell",
+            "User": "用户",
+            "Maximum output (bytes)": "最大输出（字节）",
+            "Log output": "日志输出",
+            "Use global setting": "使用全局设置",
+            "Environment (one KEY=VALUE per line)": "环境变量（每行一个 KEY=VALUE）",
+            "Tags (one per line)": "标签（每行一个）",
+            "Run on startup": "启动时运行",
+            "Save job": "保存任务",
+            "Filename": "文件名",
+            "Script contents": "脚本内容",
+            "Save executable script": "保存可执行脚本",
+            "Execution Logs": "执行日志",
+            "Loading...": "正在加载…",
+            "Are you sure?": "确认操作？",
+            "This action cannot be undone.": "此操作无法撤销。",
+            "Confirm": "确认",
+            "Access Required": "需要登录",
+            "Please enter your Token to continue.": "请输入 Token 以继续。",
+            "Verify": "验证",
+            "Dashboard pages": "控制台页面",
+            "Logout": "退出",
+            "Login": "登录",
+            "Invalid Token. Please try again.": "Token 无效，请重试。",
+            "Could not verify token (HTTP {0}).": "无法验证 Token（HTTP {0}）。",
+            "Select all packages": "选择所有依赖",
+            "Close": "关闭",
+            "Use global shell": "使用全局 Shell",
+            "Default: nobody when running as root": "FlashCron 以 root 运行时默认为 nobody",
+            "Running...": "运行中…",
+            "Edit": "编辑",
+            "Delete": "删除",
+            "Invalid job name, command, or schedule.": "任务名、命令或 Cron 表达式无效。",
+            "Job updated.": "任务已更新。",
+            "Job created.": "任务已创建。",
+            "Delete job": "删除任务",
+            "Delete script": "删除脚本",
+            "Executable script saved.": "可执行脚本已保存。",
+            "Job enabled.": "任务已启用。",
+            "Job disabled.": "任务已禁用。",
+            "View Logs": "查看日志",
+            "Run Job": "运行任务",
+            "Unauthorized Access": "未授权访问",
+            "Connection Error": "连接错误",
+            "network error": "网络错误",
+            "Uptime": "运行时长",
+            "Running Now": "正在运行",
+            "Executions (Success / Fail)": "执行次数（成功 / 失败）",
+            "Idle": "空闲",
+            "Running": "运行中",
+            "Starting": "启动中",
+            "Queued": "排队中",
+            "Success": "成功",
+            "Failed": "失败",
+            "Timeout": "超时",
+            "Pending": "待处理",
+            "Installed": "已安装",
+            "Disable": "禁用",
+            "Enable": "启用",
+            "Run": "运行",
+            "Recent Global History": "最近全局历史",
+            "No history found": "暂无历史记录",
+            "RUNNING": "运行中",
+            "View live output": "查看实时输出",
+            "Execution details not found.": "未找到执行详情。",
+            "No output": "无输出",
+            "No output yet": "暂无输出",
+            "Job": "任务",
+            "Duration": "耗时",
+            "OUTPUT": "输出",
+            "END": "结束",
+            "LIVE OUTPUT": "实时输出",
+            "Waiting for output…": "正在等待输出…",
+            "Exit Reason": "退出原因",
+            "CRON": "定时",
+            "MANUAL": "手动",
+            "STARTUP": "启动",
+            "RETRY": "重试",
+            "Failed to load packages.": "加载依赖失败。",
+            "No packages configured.": "尚未配置依赖。",
+            "Latest": "最新版",
+            "Update": "更新",
+            "Remove": "移除",
+            "Edit package": "编辑依赖",
+            "Please enter a package name.": "请输入依赖名。",
+            "Remove packages": "移除依赖",
+            "Unauthorized. Token required.": "未授权，需要 Token。",
+            "Failed to update package.": "更新依赖失败。",
+            "Connection error": "连接错误",
+            "Delete Package": "移除依赖",
+            "Failed to remove package": "移除依赖失败",
+            "Edit {0}": "编辑 {0}",
+            "Could not load job (HTTP {0}).": "无法加载任务（HTTP {0}）。",
+            "Environment line {0} must use KEY=VALUE.": "环境变量第 {0} 行须使用 KEY=VALUE 格式。",
+            "Environment line {0} must include a key.": "环境变量第 {0} 行缺少变量名。",
+            "Save failed (HTTP {0}).": "保存失败（HTTP {0}）。",
+            "Delete \"{0}\" and its saved history?": "删除“{0}”及其保存的历史记录？",
+            "Could not delete job (HTTP {0}).": "无法删除任务（HTTP {0}）。",
+            "Job \"{0}\" deleted.": "任务“{0}”已删除。",
+            "Delete \"{0}\"? Jobs that reference it will fail until updated.": "删除“{0}”？引用该脚本的任务在更新前将执行失败。",
+            "Could not delete script (HTTP {0}).": "无法删除脚本（HTTP {0}）。",
+            "Script \"{0}\" deleted.": "脚本“{0}”已删除。",
+            "Could not read script (HTTP {0}).": "无法读取脚本（HTTP {0}）。",
+            "Could not save script (HTTP {0}).": "无法保存脚本（HTTP {0}）。",
+            "Could not update job (HTTP {0}).": "无法更新任务（HTTP {0}）。",
+            "Job \"{0}\" completed successfully": "任务“{0}”已成功完成",
+            "Job \"{0}\" failed": "任务“{0}”执行失败",
+            "Execute \"{0}\" immediately?": "立即执行“{0}”？",
+            "Started {0}. Waiting for result...": "任务“{0}”已运行，等待结果…",
+            "Failed to run \"{0}\"": "运行“{0}”失败",
+            "Updated: {0}": "更新于：{0}",
+            "No enabled jobs found.": "暂无已启用的任务。",
+            "No disabled jobs found.": "暂无已禁用的任务。",
+            "History: {0}": "历史记录：{0}",
+            "Are you sure you want to log out?": "确定退出登录？",
+            "Could not load live output (HTTP {0}).": "无法加载实时输出（HTTP {0}）。",
+            "Select {0}": "选择 {0}",
+            "Invalid or duplicate package: {0}. Use name or name=version.": "依赖无效或重复：{0}。请使用依赖名或 依赖名=版本。",
+            "Could not save packages (HTTP {0}).": "无法保存依赖（HTTP {0}）。",
+            "{0} package(s) queued for installation.": "已将 {0} 个依赖加入安装队列。",
+            "Remove {0} selected package(s) from the managed list? Installed packages will remain on disk.": "从管理清单移除选中的 {0} 个依赖？已安装的依赖仍会保留在磁盘中。",
+            "Could not remove packages (HTTP {0}).": "无法移除依赖（HTTP {0}）。",
+            "{0} package(s) removed.": "已移除 {0} 个依赖。",
+            "APT mirror saved.": "APT 镜像源已保存。",
+            "PIP index saved.": "PIP 镜像地址已保存。",
+            "Could not load package sources (HTTP {0}).": "无法读取软件源（HTTP {0}）。",
+            "Could not save package source (HTTP {0}).": "无法保存软件源（HTTP {0}）。",
+            "Update queued: {0}": "已加入更新队列：{0}",
+            "Failed to update package (HTTP {0}).": "更新依赖失败（HTTP {0}）。",
+            "Are you sure you want to remove \"{0}\" from the managed list?": "确定从管理清单移除“{0}”吗？",
+            "Package \"{0}\" removed.": "依赖“{0}”已移除。",
+            "Failed to remove package (HTTP {0}).": "移除依赖失败（HTTP {0}）。",
+            "{0} min": "{0} 分钟",
+            "{0} h": "{0} 小时",
+            "{0} ms": "{0} 毫秒",
+            "{0} s": "{0} 秒",
+            "Unknown": "未知",
+            "Stopped": "已停止"
+        };
+
+        function t(message, ...values) {
+            const text = isChinese ? (translations[message] ?? message) : message;
+            return text.replace(/\{(\d+)\}/g, (_, index) => String(values[index] ?? ''));
+        }
+
+        document.documentElement.lang = isChinese ? 'zh-CN' : 'en';
+        document.querySelectorAll('[data-i18n]').forEach(element => {
+            element.textContent = t(element.dataset.i18n);
+        });
+        for (const attribute of ['title', 'placeholder', 'aria-label']) {
+            document.querySelectorAll(`[data-i18n-${attribute}]`).forEach(element => {
+                element.setAttribute(attribute, t(element.getAttribute(`data-i18n-${attribute}`)));
+            });
+        }
+
+        let currentJob = null;
+        let activeTab = 'enabled';
+        let editingJob = null;
+        let scriptEntries = [];
+        let latestJobs = [];
+        let liveOutputAbort = null;
+
+        function formatTime(isoString) {
+            if (!isoString) return 'N/A';
+            return new Date(isoString).toLocaleString(locale);
+        }
+
+        function formatDuration(start, end) {
+            if (!end) return t("Running...");
+            const s = new Date(start), e = new Date(end);
+            const ms = e - s;
+            if (ms < 1000) return t('{0} ms', ms);
+            return t('{0} s', (ms / 1000).toFixed(2));
+        }
+
+        function getStatusName(statusObj) {
+            if (!statusObj) return 'Idle';
+            if (typeof statusObj === 'string') return statusObj;
+            return Object.keys(statusObj)[0];
+        }
+
+        function showToast(message, type = 'success', duration = 3000, action = null) {
+            const container = document.getElementById('toast-container');
+            const toast = document.createElement('div');
+            let colorClass = 'bg-gray-900';
+            if (type === 'error') colorClass = 'bg-red-600';
+            if (type === 'info') colorClass = 'bg-blue-600';
+            if (type === 'success') colorClass = 'bg-green-600';
+            
+            toast.className = `${colorClass} text-white px-5 py-3 rounded-xl shadow-2xl flex items-center gap-3 transform transition-all duration-300 translate-y-10 opacity-0 min-w-[300px]`;
+            let innerHTML = `<span class="text-sm font-medium flex-1">${message}</span>`;
+            if (action) {
+                innerHTML += `<button type="button" class="text-xs font-semibold px-2 py-1 bg-white/20 hover:bg-white/30 rounded transition-colors whitespace-nowrap" onclick="${action.onclick}">${action.text}</button>`;
+            }
+            toast.innerHTML = innerHTML;
+            
+            container.appendChild(toast);
+            
+            // Force a reflow
+            toast.offsetHeight;
+            
+            setTimeout(() => {
+                toast.classList.remove('translate-y-10', 'opacity-0');
+            }, 50);
+            
+            const close = () => {
+                toast.classList.add('opacity-0', 'translate-y-2');
+                setTimeout(() => toast.remove(), 300);
+            };
+
+            if (duration !== Infinity) {
+                setTimeout(close, duration);
+            }
+
+            return { close };
+        }
+
+        function openModal(id, title = 'Execution Logs') {
+            if (id === 'modal') {
+                const heading = document.getElementById('modal-title');
+                heading.dataset.i18n = title;
+                heading.textContent = t(title);
+            }
+            const el = document.getElementById(id);
+            el.classList.remove('hidden');
+            el.classList.add('flex');
+        }
+
+        function closeModal(id) {
+            if (id === 'modal') liveOutputAbort?.abort();
+            const el = document.getElementById(id);
+            el.classList.add('hidden');
+            el.classList.remove('flex');
+        }
+
+        function customConfirm(title, message) {
+            return new Promise((resolve) => {
+                document.getElementById('confirm-title').innerText = title;
+                document.getElementById('confirm-message').innerText = message;
+                openModal('confirm-modal');
+                
+                const btn = document.getElementById('confirm-yes');
+                const cleanHandler = (val) => {
+                    closeModal('confirm-modal');
+                    btn.onclick = null;
+                    resolve(val);
+                };
+                
+                btn.onclick = () => cleanHandler(true);
+            });
+        }
+
+        async function requestToken() {
+            return new Promise((resolve) => {
+                const input = document.getElementById('auth-token-input');
+                const form = document.getElementById('auth-form');
+                const errorMessage = document.getElementById('auth-error');
+                const cancel = form.querySelector('button[type="button"]');
+                input.value = '';
+                errorMessage.classList.add('hidden');
+                openModal('auth-modal');
+                input.focus();
+                const finish = (verified) => {
+                    closeModal('auth-modal');
+                    form.onsubmit = null;
+                    cancel.onclick = null;
+                    resolve(verified);
+                };
+
+                const handler = async (e) => {
+                    e.preventDefault();
+                    errorMessage.classList.add('hidden');
+                    const val = input.value.trim();
+                    if (val) {
+                        const submit = document.getElementById('auth-submit');
+                        submit.disabled = true;
+                        try {
+                            const response = await fetch('/api/scripts', { headers: { 'Runtime-Id': val } });
+                            if (!response.ok) {
+                                errorMessage.textContent = response.status === 401 ? t('Invalid Token. Please try again.') : t('Could not verify token (HTTP {0}).', response.status);
+                                errorMessage.classList.remove('hidden');
+                                return;
+                            }
+                            localStorage.setItem('fc_runtime_id', val);
+                            updateAuthButton();
+                            finish(true);
+                        } catch (error) {
+                            errorMessage.textContent = t('Connection error');
+                            errorMessage.classList.remove('hidden');
+                        } finally {
+                            submit.disabled = false;
+                        }
+                    }
+                };
+                cancel.onclick = () => finish(false);
+                form.onsubmit = handler;
+            });
+        }
+
+        async function fetchAPI(endpoint, options = {}, isRetry = false) {
+            const headers = { ...options.headers };
+            const token = localStorage.getItem('fc_runtime_id');
+            if (token) {
+                headers['Runtime-Id'] = token;
+            }
+
+            try {
+                const res = await fetch(endpoint, { ...options, headers });
+                if (res.status === 401) {
+                    localStorage.removeItem('fc_runtime_id');
+                    updateAuthButton();
+                }
+                
+                if (res.status === 401 && !isRetry) {
+                    if (await requestToken()) {
+                        return await fetchAPI(endpoint, options, true);
+                    }
+                }
+
+                if (!res.ok) {
+                    return { error: true, status: res.status };
+                }
+
+                if (res.status === 204) {
+                    return { status: 204 };
+                }
+
+                return await res.json();
+            } catch (err) {
+                console.error(`Error fetching ${endpoint}:`, err);
+                return { error: true, message: err.message };
+            }
+        }
+
+        function setTab(tab) {
+            activeTab = tab;
+            updateTabStyles();
+            updateDashboard();
+        }
+
+        function shellQuote(value) {
+            return "'" + value.replaceAll("'", "'\\''") + "'";
+        }
+
+        async function refreshScriptLists() {
+            const result = await fetchAPI('/api/scripts');
+            if (!result || result.error) return false;
+            scriptEntries = result;
+            const selector = document.getElementById('job-script-select');
+            selector.replaceChildren(new Option(t("Select a script or enter a command below"), ''));
+            for (const script of scriptEntries) {
+                selector.add(new Option(script.path, script.path));
+            }
+
+            const tbody = document.getElementById('scripts-tbody');
+            tbody.replaceChildren();
+            if (scriptEntries.length === 0) {
+                const row = tbody.insertRow();
+                const cell = row.insertCell();
+                cell.colSpan = 3;
+                cell.className = 'px-4 py-6 text-center text-sm text-gray-500';
+                cell.textContent = t("No scripts");
+                return true;
+            }
+            for (const script of scriptEntries) {
+                const row = tbody.insertRow();
+                const name = row.insertCell();
+                const path = row.insertCell();
+                const action = row.insertCell();
+                row.className = 'hover:bg-gray-50 transition-colors';
+                name.className = 'px-6 py-4 text-sm font-medium text-gray-900';
+                path.className = 'px-6 py-4 text-sm font-mono text-gray-600';
+                action.className = 'px-6 py-4 text-right';
+                name.textContent = script.name;
+                path.textContent = script.path;
+                const edit = document.createElement('button');
+                edit.type = 'button';
+                edit.className = 'ml-2 px-2 py-1.5 rounded-md text-sm font-medium transition-colors cursor-pointer text-indigo-700 bg-indigo-50 hover:bg-indigo-100';
+                edit.textContent = t("Edit");
+                edit.addEventListener('click', () => openScriptEditor(script.name));
+                const remove = document.createElement('button');
+                remove.type = 'button';
+                remove.className = 'ml-2 px-2 py-1.5 rounded-md text-sm font-medium transition-colors cursor-pointer text-red-700 bg-red-50 hover:bg-red-100';
+                remove.textContent = t("Delete");
+                remove.addEventListener('click', () => deleteScript(script.name));
+                action.append(edit, remove);
+            }
+            return true;
+        }
+
+        function useSelectedScript() {
+            const path = document.getElementById('job-script-select').value;
+            if (path) document.getElementById('job-command').value = shellQuote(path);
+        }
+
+        async function openJobEditor(job = null) {
+            if (!await refreshScriptLists()) return;
+            editingJob = job;
+            document.getElementById('job-editor-title').innerText = job ? t("Edit {0}", job.name) : t("Add job");
+            document.getElementById('job-name').value = job?.name || '';
+            document.getElementById('job-name').readOnly = Boolean(job);
+            document.getElementById('job-schedule').value = job?.schedule || '*/5 * * * *';
+            document.getElementById('job-description').value = job?.description || '';
+            document.getElementById('job-command').value = job?.command || '';
+            document.getElementById('job-working-dir').value = job?.working_dir || '';
+            document.getElementById('job-timeout').value = job?.timeout ?? 0;
+            document.getElementById('job-retry-count').value = job?.retry_count ?? 0;
+            document.getElementById('job-retry-delay').value = job?.retry_delay ?? 60;
+            document.getElementById('job-shell').value = job?.shell || '';
+            document.getElementById('job-user').value = job?.user || '';
+            document.getElementById('job-max-output').value = job?.max_output_size ?? 1048576;
+            document.getElementById('job-environment').value = Object.entries(job?.environment || {})
+                .map(([key, value]) => `${key}=${value}`).join('\n');
+            document.getElementById('job-tags').value = (job?.tags || []).join('\n');
+            document.getElementById('job-print-output').value = job?.print_output == null ? '' : String(job.print_output);
+            document.getElementById('job-enabled').checked = job?.enabled ?? true;
+            document.getElementById('job-run-on-startup').checked = job?.run_on_startup ?? false;
+            document.getElementById('job-form-error').classList.add('hidden');
+            document.getElementById('job-editor').classList.remove('hidden');
+        }
+
+        async function editJob(name) {
+            const job = await fetchAPI(`/api/jobs/${encodeURIComponent(name)}`);
+            if (!job || job.error) {
+                showToast(t("Could not load job (HTTP {0}).", job?.status || t("network error")), 'error');
+                return;
+            }
+            openJobEditor(job);
+        }
+
+        function closeJobEditor() {
+            document.getElementById('job-editor').classList.add('hidden');
+            editingJob = null;
+        }
+
+        document.getElementById('job-form').addEventListener('submit', async (event) => {
+            event.preventDefault();
+            const wasEditing = Boolean(editingJob);
+            const name = document.getElementById('job-name').value.trim();
+            const environment = {};
+            const environmentLines = document.getElementById('job-environment').value.split('\n');
+            for (let index = 0; index < environmentLines.length; index++) {
+                const line = environmentLines[index];
+                if (!line.trim()) continue;
+                const separator = line.indexOf('=');
+                if (separator <= 0) {
+                    const formError = document.getElementById('job-form-error');
+                    formError.innerText = t("Environment line {0} must use KEY=VALUE.", index + 1);
+                    formError.classList.remove('hidden');
+                    return;
+                }
+                const key = line.slice(0, separator).trim();
+                if (!key) {
+                    const formError = document.getElementById('job-form-error');
+                    formError.innerText = t("Environment line {0} must include a key.", index + 1);
+                    formError.classList.remove('hidden');
+                    return;
+                }
+                environment[key] = line.slice(separator + 1);
+            }
+            const payload = {
+                ...(editingJob || {}),
+                schedule: document.getElementById('job-schedule').value,
+                description: document.getElementById('job-description').value,
+                command: document.getElementById('job-command').value,
+                working_dir: document.getElementById('job-working-dir').value || null,
+                timeout: Number(document.getElementById('job-timeout').value || 0),
+                retry_count: Number(document.getElementById('job-retry-count').value || 0),
+                retry_delay: Number(document.getElementById('job-retry-delay').value || 0),
+                shell: document.getElementById('job-shell').value || null,
+                user: document.getElementById('job-user').value || null,
+                max_output_size: Number(document.getElementById('job-max-output').value || 0),
+                environment,
+                tags: document.getElementById('job-tags').value.split('\n').map(tag => tag.trim()).filter(Boolean),
+                print_output: document.getElementById('job-print-output').value === ''
+                    ? null
+                    : document.getElementById('job-print-output').value === 'true',
+                enabled: document.getElementById('job-enabled').checked,
+                run_on_startup: document.getElementById('job-run-on-startup').checked
+            };
+            const result = await fetchAPI(editingJob ? `/api/jobs/${encodeURIComponent(name)}` : '/api/jobs', {
+                method: editingJob ? 'PUT' : 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ ...payload, ...(editingJob ? {} : { name }) })
+            });
+            if (result?.error) {
+                const error = document.getElementById('job-form-error');
+                error.innerText = result.status === 400 ? t("Invalid job name, command, or schedule.") : t("Save failed (HTTP {0}).", result.status || t("network error"));
+                error.classList.remove('hidden');
+                return;
+            }
+            closeJobEditor();
+            showToast(wasEditing ? t("Job updated.") : t("Job created."), 'success');
+            updateDashboard();
+        });
+
+        async function toggleScripts() {
+            const scripts = await fetchAPI('/api/scripts');
+            if (!Array.isArray(scripts)) return;
+            showView('scripts');
+            refreshScriptLists();
+        }
+
+        function showDashboardView() {
+            showView('jobs');
+        }
+
+        async function deleteJob(name) {
+            if (!await customConfirm(t("Delete job"), t("Delete \"{0}\" and its saved history?", name))) return;
+            const result = await fetchAPI(`/api/jobs/${encodeURIComponent(name)}`, { method: 'DELETE' });
+            if (result?.error || result?.status !== 204) {
+                showToast(t("Could not delete job (HTTP {0}).", result?.status || t("network error")), 'error');
+                return;
+            }
+            if (currentJob === name) currentJob = null;
+            showToast(t("Job \"{0}\" deleted.", name), 'success');
+            updateDashboard();
+        }
+
+        async function deleteScript(name) {
+            if (!await customConfirm(t("Delete script"), t("Delete \"{0}\"? Jobs that reference it will fail until updated.", name))) return;
+            const result = await fetchAPI(`/api/scripts/${encodeURIComponent(name)}`, { method: 'DELETE' });
+            if (result?.error || result?.status !== 204) {
+                showToast(t("Could not delete script (HTTP {0}).", result?.status || t("network error")), 'error');
+                return;
+            }
+            showToast(t("Script \"{0}\" deleted.", name), 'success');
+            await refreshScriptLists();
+        }
+
+        async function showPackagesView() {
+            const packages = await fetchAPI('/api/pkg');
+            if (!Array.isArray(packages)) return;
+            showView('packages');
+            updatePackages(packages);
+        }
+
+        function showView(view) {
+            for (const name of ['jobs', 'scripts', 'packages']) {
+                document.getElementById(name === 'jobs' ? 'dashboard-view' : `${name}-view`)
+                    .classList.toggle('hidden', name !== view);
+                const button = document.getElementById(`nav-${name}`);
+                button.className = `rounded px-3 py-1.5 text-sm font-medium ${name === view ? 'text-white bg-indigo-500' : 'text-indigo-100 hover:bg-indigo-600 hover:text-white'} ${name === 'packages' && !isPkgManagerEnabled ? 'hidden' : ''}`;
+                if (name === view) button.setAttribute('aria-current', 'page');
+                else button.removeAttribute('aria-current');
+            }
+        }
+
+        async function openScriptEditor(name = null) {
+            let content = '#!/usr/bin/env bash\n';
+            if (name) {
+                const result = await fetchAPI(`/api/scripts/${encodeURIComponent(name)}`);
+                if (!result || result.error) {
+                    showToast(t("Could not read script (HTTP {0}).", result?.status || t("network error")), 'error');
+                    return;
+                }
+                content = result;
+            } else if (!await refreshScriptLists()) {
+                return;
+            }
+            document.getElementById('script-editor-title').innerText = name ? t("Edit {0}", name) : t("Add script");
+            document.getElementById('script-name').value = name || '';
+            document.getElementById('script-name').readOnly = Boolean(name);
+            document.getElementById('script-content').value = content;
+            document.getElementById('script-form-error').classList.add('hidden');
+            document.getElementById('script-editor').classList.remove('hidden');
+        }
+
+        function closeScriptEditor() {
+            document.getElementById('script-editor').classList.add('hidden');
+        }
+
+        document.getElementById('script-form').addEventListener('submit', async (event) => {
+            event.preventDefault();
+            const name = document.getElementById('script-name').value.trim();
+            const result = await fetchAPI(`/api/scripts/${encodeURIComponent(name)}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'text/plain' },
+                body: document.getElementById('script-content').value
+            });
+            if (result?.error) {
+                const error = document.getElementById('script-form-error');
+                error.innerText = t("Could not save script (HTTP {0}).", result.status || t("network error"));
+                error.classList.remove('hidden');
+                return;
+            }
+            closeScriptEditor();
+            showToast(t("Executable script saved."), 'success');
+            await refreshScriptLists();
+        });
+
+        async function toggleJob(name, enabled) {
+            const job = await fetchAPI(`/api/jobs/${encodeURIComponent(name)}`);
+            if (!job || job.error) {
+                showToast(t("Could not load job (HTTP {0}).", job?.status || t("network error")), 'error');
+                return;
+            }
+            job.enabled = enabled;
+            const result = await fetchAPI(`/api/jobs/${encodeURIComponent(name)}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(job)
+            });
+            if (result?.error) {
+                showToast(t("Could not update job (HTTP {0}).", result.status || t("network error")), 'error');
+                return;
+            }
+            showToast(enabled ? t("Job enabled.") : t("Job disabled."), 'success');
+            updateDashboard();
+        }
+
+        function updateTabStyles() {
+            const btnEnabled = document.getElementById('tab-enabled');
+            const btnDisabled = document.getElementById('tab-disabled');
+            const thNextRun = document.getElementById('th-next-run');
+            const thSchedule = document.getElementById('th-schedule');
+
+            if (activeTab === 'enabled') {
+                btnEnabled.className = "px-4 py-1.5 text-sm font-medium rounded-md bg-white shadow-sm text-indigo-600 transition-all cursor-pointer";
+                btnDisabled.className = "px-4 py-1.5 text-sm font-medium rounded-md text-gray-600 hover:text-gray-900 transition-all cursor-pointer";
+                if (thNextRun) thNextRun.classList.remove('hidden');
+                if (thSchedule) thSchedule.classList.remove('hidden');
+            } else {
+                btnEnabled.className = "px-4 py-1.5 text-sm font-medium rounded-md text-gray-600 hover:text-gray-900 transition-all cursor-pointer";
+                btnDisabled.className = "px-4 py-1.5 text-sm font-medium rounded-md bg-white shadow-sm text-indigo-600 transition-all cursor-pointer";
+                if (thNextRun) thNextRun.classList.add('hidden');
+                if (thSchedule) thSchedule.classList.add('hidden');
+            }
+        }
+
+        async function pollJobStatus(name, execId, attempts = 0) {
+            if (attempts > 300) return; // give up after 5 mins
+
+            const exec = await fetchAPI(`/api/history/${execId}`);
+            if (exec && !exec.error) {
+                const statusName = getStatusName(exec.status);
+                if (statusName !== 'Running' && statusName !== 'Pending') {
+                    const success = statusName === 'Success';
+                    const msg = t(success ? 'Job "{0}" completed successfully' : 'Job "{0}" failed', name);
+                    
+                    showToast(msg, success ? 'success' : 'error', 8000, {
+                        text: t("View Logs"),
+                        onclick: `showLogs('${execId}')`
+                    });
+
+                    updateDashboard();
+                    return;
+                }
+            }
+            
+            setTimeout(() => pollJobStatus(name, execId, attempts + 1), 1000);
+        }
+
+        async function triggerJob(e, name) {
+            e.preventDefault();
+            e.stopPropagation();
+            if (!await customConfirm(t("Run Job"), t("Execute \"{0}\" immediately?", name))) return;
+            
+            try {
+                const res = await fetchAPI(`/api/jobs/${encodeURIComponent(name)}/trigger`, { method: 'POST' });
+                
+                if (res && !res.error && res.status === 'triggered') {
+                    showToast(t("Started {0}. Waiting for result...", name), 'info');
+                    updateDashboard();
+                    if (res.execution_id) {
+                        pollJobStatus(name, res.execution_id);
+                    }
+                } else if (res && res.status === 401) {
+                    showToast(t("Unauthorized Access"), "error");
+                } else {
+                    showToast(t("Failed to run \"{0}\"", name), "error");
+                }
+            } catch (err) {
+                showToast(t("Connection Error"), "error");
+            }
+        }
+
+        async function updateDashboard() {
+            const status = await fetchAPI('/api/status');
+            const jobs = await fetchAPI('/api/jobs');
+            if (Array.isArray(jobs)) latestJobs = jobs;
+
+            document.getElementById('last-updated').innerText = t("Updated: {0}", new Date().toLocaleTimeString(locale));
+            updateTabStyles();
+
+            if (status && !status.error) {
+                const uptime = status.uptime_seconds < 3600 
+                    ? t('{0} min', Math.floor(status.uptime_seconds / 60))
+                    : t('{0} h', (status.uptime_seconds / 3600).toFixed(1));
+                const successes = status.total_executions - status.total_failures;
+
+                document.getElementById('stats-container').innerHTML = `
+                    <div class="bg-white rounded-lg shadow p-6 border-t-4 border-indigo-500">
+                        <div class="text-sm font-medium text-gray-500 truncate">${t("Uptime")}</div>
+                        <div class="mt-1 text-3xl font-semibold text-gray-900">${uptime}</div>
+                    </div>
+                    <div class="bg-white rounded-lg shadow p-6 border-t-4 border-blue-500">
+                        <div class="text-sm font-medium text-gray-500 truncate">${t("Scheduled Jobs")}</div>
+                        <div class="mt-1 text-3xl font-semibold text-gray-900">${status.enabled_jobs} <span class="text-sm text-gray-400 font-normal">/ ${status.total_jobs}</span></div>
+                    </div>
+                    <div class="bg-white rounded-lg shadow p-6 border-t-4 border-yellow-500">
+                        <div class="text-sm font-medium text-gray-500 truncate">${t("Running Now")}</div>
+                        <div class="mt-1 text-3xl font-semibold text-gray-900 ${status.running_jobs > 0 ? 'text-yellow-600 animate-pulse' : ''}">${status.running_jobs}</div>
+                    </div>
+                    <div class="bg-white rounded-lg shadow p-6 border-t-4 border-green-500">
+                        <div class="text-sm font-medium text-gray-500 truncate">${t("Executions (Success / Fail)")}</div>
+                        <div class="mt-1 text-3xl font-semibold text-gray-900 text-green-600">${successes} <span class="text-sm text-red-500 font-normal">/ ${status.total_failures}</span></div>
+                    </div>
+                `;
+            } else if (!status) {
+
+                 document.getElementById('stats-container').innerHTML = Array(4).fill(0).map(() => `
+                    <div class="bg-white rounded-lg shadow p-6 border-t-4 border-gray-100">
+                        <div class="h-4 w-1/3 skeleton rounded mb-2"></div>
+                        <div class="h-8 w-2/3 skeleton rounded"></div>
+                    </div>
+                `).join('');
+            }
+
+            if (jobs && !jobs.error) {
+                const tbody = document.getElementById('jobs-tbody');
+                tbody.innerHTML = '';
+                
+                const filteredJobs = jobs.filter(job => activeTab === 'enabled' ? job.enabled : !job.enabled);
+                
+                if (filteredJobs.length === 0) {
+                    tbody.innerHTML = `<tr><td colspan="5" class="px-6 py-10 text-center text-sm text-gray-500 italic">${t(activeTab === 'enabled' ? 'No enabled jobs found.' : 'No disabled jobs found.')}</td></tr>`;
+                } else {
+                    filteredJobs.sort((a, b) => a.name.localeCompare(b.name)).forEach(job => {
+                        const runState = job.run_state || 'Idle';
+                        const statusName = job.last_status ? getStatusName(job.last_status) : null;
+                        const statusColor =
+                            runState === 'Running' || runState === 'Starting'
+                                ? 'bg-blue-100 text-blue-800 border-blue-200'
+                                : runState === 'Queued'
+                                    ? 'bg-yellow-100 text-yellow-800 border-yellow-200'
+                                    : (statusName === 'Success'
+                                        ? 'bg-green-100 text-green-800 border-green-200'
+                                        : (statusName ? 'bg-red-100 text-red-800 border-red-200' : 'bg-gray-100 text-gray-800 border-gray-200'));
+                        const statusText = runState !== 'Idle' ? runState : (statusName || 'Idle');
+                        
+                        const tr = document.createElement('tr');
+                        tr.className = `hover:bg-gray-50 cursor-pointer transition-colors ${currentJob === job.name ? 'bg-indigo-50' : ''}`;
+                        tr.onclick = () => loadHistory(job.name);
+                        
+                        const hidden = activeTab === 'enabled' ? '' : 'hidden';
+
+                        tr.innerHTML = `
+                            <td class="px-6 py-4 whitespace-nowrap font-medium text-gray-900 job-name-cell"></td>
+                            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500 font-mono ${hidden}">${job.schedule}</td>
+                            <td class="px-6 py-4 whitespace-nowrap">
+                                <span class="px-2.5 py-0.5 inline-flex text-xs leading-5 font-semibold rounded-full border ${statusColor}">
+                                    ${t(statusText)}
+                                </span>
+                            </td>
+                            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500 ${hidden}">${formatTime(job.next_run)}</td>
+                            <td class="px-6 py-4 whitespace-nowrap text-right text-sm job-actions"></td>
+                        `;
+                        const nameCell = tr.querySelector('.job-name-cell');
+                        if (runState === 'Running') {
+                            const statusCell = tr.children[2];
+                            const statusButton = document.createElement('button');
+                            statusButton.type = 'button';
+                            statusButton.className = 'px-2.5 py-0.5 inline-flex text-xs leading-5 font-semibold rounded-full border bg-blue-100 text-blue-800 border-blue-200 hover:bg-blue-200';
+                            statusButton.textContent = t(statusText);
+                            statusButton.title = t('View live output');
+                            statusButton.addEventListener('click', (event) => {
+                                event.stopPropagation();
+                                showLiveLogs(job.name);
+                            });
+                            statusCell.replaceChildren(statusButton);
+                        }
+                        const nameLabel = document.createElement('span');
+                        nameLabel.textContent = job.name;
+                        nameCell.append(nameLabel);
+                        const actions = tr.querySelector('.job-actions');
+                        const addAction = (label, style, action) => {
+                            const button = document.createElement('button');
+                            button.type = 'button';
+                            button.className = `ml-2 px-2 py-1.5 rounded-md text-sm font-medium transition-colors cursor-pointer ${style}`;
+                            button.textContent = t(label);
+                            button.addEventListener('click', (event) => {
+                                event.stopPropagation();
+                                action(event);
+                            });
+                            actions.append(button);
+                        };
+                        addAction(t("Edit"), 'text-indigo-700 bg-indigo-50 hover:bg-indigo-100', () => editJob(job.name));
+                        addAction(t("Delete"), 'text-red-700 bg-red-50 hover:bg-red-100', () => deleteJob(job.name));
+                        addAction(job.enabled ? t("Disable") : t("Enable"), job.enabled
+                            ? 'text-yellow-600 bg-yellow-50 hover:bg-yellow-100'
+                            : 'text-green-700 bg-green-50 hover:bg-green-100',
+                            () => toggleJob(job.name, !job.enabled));
+                        if (!job.enabled) addAction(t("Run"), 'text-indigo-600 hover:text-indigo-900 bg-indigo-50 hover:bg-indigo-100', (event) => triggerJob(event, job.name));
+                        tbody.appendChild(tr);
+                    });
+                }
+            } else if (!jobs) {
+                const tbody = document.getElementById('jobs-tbody');
+                tbody.innerHTML = Array(5).fill(0).map(() => `
+                    <tr>
+                        <td class="px-6 py-4"><div class="h-4 w-24 skeleton rounded"></div></td>
+                        <td class="px-6 py-4 ${activeTab === 'disabled' ? 'hidden' : ''}"><div class="h-4 w-20 skeleton rounded"></div></td>
+                        <td class="px-6 py-4"><div class="h-5 w-16 skeleton rounded-full"></div></td>
+                        <td class="px-6 py-4 ${activeTab === 'disabled' ? 'hidden' : ''}"><div class="h-4 w-32 skeleton rounded"></div></td>
+                        <td class="px-6 py-4"><div class="h-4 w-24 skeleton rounded"></div></td>
+                    </tr>
+                `).join('');
+            }
+            
+            if (currentJob) loadHistory(currentJob, true);
+            else loadHistory(null, true);
+        }
+
+        async function loadHistory(jobName, silent = false) {
+            currentJob = jobName;
+            document.getElementById('history-title').innerText = jobName ? t("History: {0}", jobName) : t("Recent Global History");
+            
+            const container = document.getElementById('history-container');
+            if (!silent) {
+                container.innerHTML = Array(6).fill(0).map(() => `
+                    <div class="p-4 border-b border-gray-100 bg-white">
+                        <div class="flex justify-between mb-2"><div class="h-4 w-1/3 skeleton rounded"></div><div class="h-3 w-1/4 skeleton rounded"></div></div>
+                        <div class="h-3 w-1/2 skeleton rounded"></div>
+                    </div>
+                `).join('');
+            }
+            
+            const data = await fetchAPI(jobName 
+                ? `/api/jobs/${encodeURIComponent(jobName)}/history?limit=50` 
+                : `/api/history?limit=50`
+            );
+            if (!data || data.error || !data.history) return;
+            
+            if (data.history.length === 0 && !latestJobs.some(job => job.run_state === 'Running' && (!jobName || job.name === jobName))) {
+                container.innerHTML = `<div class="p-6 text-center text-sm text-gray-500">${t("No history found")}</div>`;
+                return;
+            }
+
+            container.innerHTML = '';
+            for (const job of latestJobs.filter(job => job.run_state === 'Running' && (!jobName || job.name === jobName))) {
+                const entry = document.createElement('button');
+                entry.type = 'button';
+                entry.className = 'block w-full mb-2 rounded-md border border-gray-200 p-4 text-left hover:bg-gray-100 cursor-pointer border-l-4 border-l-blue-500 bg-white group';
+                entry.innerHTML = `
+                    <div class="flex justify-between items-start mb-1">
+                        <div class="flex flex-col gap-1">
+                            <span class="font-bold text-sm text-gray-900 history-job-name"></span>
+                            <div class="flex items-center gap-2">
+                                <span class="bg-blue-50 text-blue-700 px-1.5 py-0.5 rounded text-[10px] font-bold tracking-wider">${t("RUNNING")}</span>
+                                <span class="text-[11px] text-gray-400 history-start-time"></span>
+                            </div>
+                        </div>
+                        <span class="text-[11px] font-medium text-gray-400 group-hover:text-gray-600 transition-colors">${t("View live output")}</span>
+                    </div>
+                `;
+                entry.querySelector('.history-job-name').textContent = job.name;
+                entry.querySelector('.history-start-time').textContent = formatTime(job.last_run);
+                entry.onclick = () => showLiveLogs(job.name);
+                container.appendChild(entry);
+            }
+            data.history.forEach(h => {
+                const statusName = getStatusName(h.status);
+                const success = statusName === 'Success';
+                const trigger = (h.trigger || 'cron').toUpperCase();
+                
+                const div = document.createElement('div');
+                div.className = `mb-2 rounded-md border border-gray-200 p-4 hover:bg-gray-100 cursor-pointer border-l-4 ${success ? 'border-l-green-500' : 'border-l-red-500'} bg-white group`;
+                div.onclick = () => showLogs(h.id);
+                div.innerHTML = `
+                    <div class="flex justify-between items-start mb-1">
+                        <div class="flex flex-col gap-1">
+                            <span class="font-bold text-sm text-gray-900">${h.job_name}</span>
+                            <div class="flex items-center gap-2">
+                                <span class="bg-gray-100 text-gray-500 px-1.5 py-0.5 rounded text-[10px] font-bold tracking-wider">${t(trigger)}</span>
+                                <span class="text-[11px] text-gray-400">${formatTime(h.started_at)}</span>
+                            </div>
+                        </div>
+                        <span class="text-[11px] font-medium text-gray-400 group-hover:text-gray-600 transition-colors">${formatDuration(h.started_at, h.ended_at)}</span>
+                    </div>
+                `;
+                container.appendChild(div);
+            });
+        }
+
+        function updateAuthButton() {
+            const loggedIn = Boolean(localStorage.getItem('fc_runtime_id'));
+            const button = document.getElementById('auth-toggle');
+            button.title = t(loggedIn ? 'Logout' : 'Login');
+            button.setAttribute('aria-label', button.title);
+            button.querySelector('svg').style.transform = loggedIn ? '' : 'scaleX(-1)';
+        }
+
+        async function toggleAuthentication() {
+            if (!localStorage.getItem('fc_runtime_id')) {
+                await requestToken();
+                return;
+            }
+            if (await customConfirm(t("Logout"), t("Are you sure you want to log out?"))) {
+                localStorage.removeItem('fc_runtime_id');
+                updateAuthButton();
+                window.location.reload();
+            }
+        }
+
+        async function showLogs(id) {
+            liveOutputAbort?.abort();
+            const modal = document.getElementById('modal');
+            const content = document.getElementById('modal-content');
+            openModal('modal');
+            content.innerHTML = t("Loading...");
+            
+            const exec = await fetchAPI(`/api/history/${id}`);
+            if (exec && !exec.error) {
+                const statusName = getStatusName(exec.status);
+                let logs = `${t('Job')}: ${exec.job_name}\nID: ${exec.id}\n${t('Status')}: ${t(statusName)}\n${t('Duration')}: ${formatDuration(exec.started_at, exec.ended_at)}\n`;
+                
+                const output = (exec.output || '').trim();
+                
+                logs += `\n--- ${t('OUTPUT')} ---\n${output || t('No output')}\n--- ${t('END')} ---\n`;
+                
+                if (exec.status.Failed && exec.status.Failed.error) {
+                    logs += `\n${t('Exit Reason')}: ${exec.status.Failed.error}\n`;
+                }
+                
+                content.innerText = logs;
+            } else {
+                content.innerText = t("Execution details not found.");
+            }
+        }
+
+        async function showLiveLogs(name) {
+            liveOutputAbort?.abort();
+            const controller = new AbortController();
+            liveOutputAbort = controller;
+            const endpoint = `/api/jobs/${encodeURIComponent(name)}/output/stream`;
+            const connect = () => fetch(endpoint, {
+                signal: controller.signal,
+                headers: { 'Runtime-Id': localStorage.getItem('fc_runtime_id') || '' }
+            });
+            try {
+                let response = await connect();
+                if (response.status === 401) {
+                    if (!await requestToken()) return;
+                    response = await connect();
+                }
+                if (!response.ok) throw new Error(t("Could not load live output (HTTP {0}).", response.status));
+                openModal('modal');
+                const content = document.getElementById('modal-content');
+                content.textContent = `${t('Job')}: ${name}\n${t('Status')}: ${t('Running')}\n\n${t('Waiting for output…')}`;
+                const reader = response.body.getReader();
+                const decoder = new TextDecoder();
+                let buffer = '';
+                while (!controller.signal.aborted) {
+                    const { value, done } = await reader.read();
+                    if (done) break;
+                    buffer += decoder.decode(value, { stream: true }).replaceAll('\r\n', '\n');
+                    let boundary;
+                    while ((boundary = buffer.indexOf('\n\n')) !== -1) {
+                        const frame = buffer.slice(0, boundary);
+                        buffer = buffer.slice(boundary + 2);
+                        const lines = frame.split('\n');
+                        const type = lines.find(line => line.startsWith('event:'))?.slice(6).trim();
+                        const data = lines.filter(line => line.startsWith('data:')).map(line => line.slice(5).replace(/^ /, '')).join('\n');
+                        if (type === 'output') {
+                            content.textContent = `${t('Job')}: ${name}\n${t('Status')}: ${t('Running')}\n\n--- ${t('LIVE OUTPUT')} ---\n${data || t('No output yet')}`;
+                            content.scrollTop = content.scrollHeight;
+                        }
+                        if (type === 'complete') {
+                            await showLogs(data);
+                            return;
+                        }
+                    }
+                }
+            } catch (error) {
+                if (error.name !== 'AbortError') showToast(error.message, 'error');
+            }
+        }
+
+        const isPkgManagerEnabled = !document.getElementById('nav-packages').classList.contains('hidden');
+
+        const selectedPackageIds = new Set();
+
+        async function openPackageSources() {
+            if (!await updatePackageSources()) return;
+            openModal('package-sources');
+            document.getElementById('apt-mirror-input').focus();
+        }
+
+        async function updatePackageSources() {
+            const sources = await fetchAPI('/api/pkg/sources');
+            if (!sources || sources.error) {
+                showToast(t("Could not load package sources (HTTP {0}).", sources?.status || t("network error")), 'error');
+                return;
+            }
+            document.getElementById('apt-mirror-input').value = sources.apt_mirror || '';
+            document.getElementById('pip-index-input').value = sources.pip_index_url || '';
+            return true;
+        }
+
+        async function savePackageSource(kind, value) {
+            const result = await fetchAPI('/api/pkg/sources', {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ kind, value })
+            });
+            if (result?.error || result?.status !== 204) {
+                showToast(t("Could not save package source (HTTP {0}).", result?.status || t("network error")), 'error');
+                return;
+            }
+            showToast(kind === 'apt' ? t("APT mirror saved.") : t("PIP index saved."), 'success');
+            updatePackageSources();
+        }
+
+        document.getElementById('apt-source-form').addEventListener('submit', event => {
+            event.preventDefault();
+            savePackageSource('apt', document.getElementById('apt-mirror-input').value.trim());
+        });
+
+        document.getElementById('pip-source-form').addEventListener('submit', event => {
+            event.preventDefault();
+            savePackageSource('pip', document.getElementById('pip-index-input').value.trim());
+        });
+
+        function updatePackageSelection() {
+            const inputs = [...document.querySelectorAll('.pkg-select')];
+            const all = document.getElementById('pkg-select-all');
+            all.checked = inputs.length > 0 && inputs.every(input => input.checked);
+            all.indeterminate = inputs.some(input => input.checked) && !all.checked;
+            document.getElementById('pkg-delete-selected').disabled = selectedPackageIds.size === 0;
+        }
+
+        function selectPackage(id, checked) {
+            if (checked) selectedPackageIds.add(id);
+            else selectedPackageIds.delete(id);
+            updatePackageSelection();
+        }
+
+        function selectAllPackages(checked) {
+            document.querySelectorAll('.pkg-select').forEach(input => {
+                input.checked = checked;
+                if (checked) selectedPackageIds.add(Number(input.value));
+                else selectedPackageIds.delete(Number(input.value));
+            });
+            updatePackageSelection();
+        }
+
+        async function updatePackages(pkgs) {
+            if (!isPkgManagerEnabled) return;
+            pkgs ??= await fetchAPI('/api/pkg');
+            const tbody = document.getElementById('pkgs-tbody');
+            
+            if (!pkgs || pkgs.error) {
+                tbody.innerHTML = `<tr><td colspan="8" class="px-6 py-4 text-center text-sm text-red-500">${t("Failed to load packages.")}</td></tr>`;
+                return;
+            }
+
+            for (const id of selectedPackageIds) {
+                if (!pkgs.some(pkg => pkg.id === id)) selectedPackageIds.delete(id);
+            }
+            if (pkgs.length === 0) {
+                tbody.innerHTML = `<tr><td colspan="8" class="px-6 py-4 text-center text-sm text-gray-500">${t("No packages configured.")}</td></tr>`;
+                updatePackageSelection();
+                return;
+            }
+
+            tbody.replaceChildren();
+            for (const p of pkgs) {
+                let statusColor = 'bg-yellow-100 text-yellow-800';
+                let statusText = 'Pending';
+                if (p.status === 1 || p.status === 'Installed') { statusColor = 'bg-green-100 text-green-800'; statusText = 'Installed'; }
+                else if (p.status === 0 || p.status === 'Failed') { statusColor = 'bg-red-100 text-red-800'; statusText = 'Failed'; }
+
+                const typeColor = p.pkg_type === 'APT' ? 'bg-orange-100 text-orange-800' : 'bg-blue-100 text-blue-800';
+                
+                const row = tbody.insertRow();
+                row.className = 'hover:bg-gray-50 transition-colors';
+                const cell = (className) => {
+                    const element = row.insertCell();
+                    element.className = className;
+                    return element;
+                };
+                const checkbox = document.createElement('input');
+                checkbox.className = 'pkg-select';
+                checkbox.type = 'checkbox';
+                checkbox.value = p.id;
+                checkbox.setAttribute('aria-label', t('Select {0}', p.name));
+                checkbox.checked = selectedPackageIds.has(p.id);
+                checkbox.addEventListener('change', () => selectPackage(p.id, checkbox.checked));
+                cell('px-6 py-4').append(checkbox);
+
+                const badge = document.createElement('span');
+                badge.className = `px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${typeColor}`;
+                badge.textContent = p.pkg_type;
+                cell('px-6 py-4 whitespace-nowrap').append(badge);
+                cell('px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900').textContent = p.name;
+
+                const target = document.createElement('span');
+                target.className = p.target ? 'font-mono text-xs px-1.5 py-0.5 bg-gray-100 rounded' : 'text-xs italic text-gray-400';
+                target.textContent = p.target || t('Latest');
+                cell('px-6 py-4 whitespace-nowrap text-sm text-gray-500').append(target);
+
+                const currentCell = cell('px-6 py-4 whitespace-nowrap text-sm text-gray-900');
+                if (p.current) {
+                    const current = document.createElement('span');
+                    current.className = 'font-mono font-bold text-xs';
+                    current.textContent = p.current;
+                    currentCell.append(current);
+                } else currentCell.textContent = '-';
+
+                const status = document.createElement('span');
+                status.className = `px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${statusColor}`;
+                status.textContent = t(statusText);
+                cell('px-6 py-4 whitespace-nowrap').append(status);
+                const errorCell = cell('px-6 py-4 text-sm text-red-600 truncate max-w-xs');
+                errorCell.textContent = p.error_msg || '-';
+                if (p.error_msg) {
+                    errorCell.classList.add('cursor-pointer');
+                    errorCell.tabIndex = 0;
+                    errorCell.setAttribute('role', 'button');
+                    const showError = () => {
+                        liveOutputAbort?.abort();
+                        openModal('modal', 'Error');
+                        const content = document.getElementById('modal-content');
+                        content.textContent = `${p.pkg_type}: ${p.name}\n\n${p.error_msg}`;
+                        content.scrollTop = 0;
+                    };
+                    errorCell.addEventListener('click', showError);
+                    errorCell.addEventListener('keydown', event => {
+                        if (event.key === 'Enter' || event.key === ' ') {
+                            event.preventDefault();
+                            showError();
+                        }
+                    });
+                }
+
+                const actions = cell('px-6 py-4 whitespace-nowrap text-right text-sm font-medium');
+                for (const [label, action, color] of [
+                    ['Update', () => triggerUpdatePackage(p.pkg_type, p.name, p.target || ''), 'text-green-700 bg-green-50 hover:bg-green-100'],
+                    ['Edit', () => openPackageEditor(p.pkg_type, p.name, p.target || ''), 'text-indigo-700 bg-indigo-50 hover:bg-indigo-100'],
+                    ['Remove', () => confirmDeletePackage(p.id, p.name), 'text-red-700 bg-red-50 hover:bg-red-100']
+                ]) {
+                    const button = document.createElement('button');
+                    button.className = `ml-2 px-2 py-1.5 rounded-md text-sm font-medium transition-colors cursor-pointer ${color}`;
+                    button.textContent = t(label);
+                    button.addEventListener('click', action);
+                    actions.append(button);
+                }
+            }
+            updatePackageSelection();
+        }
+
+        function openPackageEditor(type = 'APT', name = '', target = '') {
+            document.getElementById('package-editor-title').textContent = name ? t("Edit package") : t("Add packages");
+            document.getElementById('pkg-type-select').value = type;
+            document.getElementById('pkg-type-select').disabled = Boolean(name);
+            document.getElementById('pkg-add-fields').classList.toggle('hidden', Boolean(name));
+            document.getElementById('pkg-edit-fields').classList.toggle('hidden', !name);
+            document.getElementById('pkg-name-input').disabled = Boolean(name);
+            document.getElementById('pkg-name-input').value = '';
+            document.getElementById('pkg-edit-name').value = name;
+            document.getElementById('pkg-edit-target').value = target;
+            document.getElementById('package-form-error').classList.add('hidden');
+            document.getElementById('package-editor').classList.remove('hidden');
+            document.getElementById(name ? 'pkg-edit-target' : 'pkg-name-input').focus();
+        }
+
+        function closePackageEditor() {
+            document.getElementById('package-editor').classList.add('hidden');
+        }
+
+        document.getElementById('package-form').addEventListener('submit', async event => {
+            event.preventDefault();
+            const editing = document.getElementById('pkg-name-input').disabled;
+            const error = document.getElementById('package-form-error');
+            const packages = [];
+            const type = document.getElementById('pkg-type-select').value;
+            if (editing) {
+                const name = document.getElementById('pkg-edit-name').value;
+                const value = document.getElementById('pkg-edit-target').value.trim();
+                const match = value.match(/^(==|=|>=|<=|~=|>|<|\^)?\s*(\S+)$/);
+                if (value && (!match || (/^[<>~^=]/.test(value) && !match[1]) || (type === 'APT' && match[1] && !['=', '=='].includes(match[1])))) {
+                    error.textContent = t("Invalid or duplicate package: {0}. Use name or name=version.", name);
+                    error.classList.remove('hidden');
+                    return;
+                }
+                const target = value ? (match[1] && !['=', '=='].includes(match[1]) ? match[1] + match[2] : match[2]) : null;
+                packages.push({ name, target });
+            } else {
+                const names = [...new Set(document.getElementById('pkg-name-input').value.split(/\r?\n/).map(name => name.trim()).filter(Boolean))];
+                if (!names.length) {
+                    error.textContent = t("Please enter a package name.");
+                    error.classList.remove('hidden');
+                    return;
+                }
+                const seen = new Set();
+                for (const line of names) {
+                    const match = line.match(/^([A-Za-z0-9._+-]+)(?:\s*(==|=|>=|<=|~=|>|<|\^)\s*(\S+))?$/);
+                    if (!match || seen.has(match[1]) || (type === 'APT' && match[2] && !['=', '=='].includes(match[2]))) {
+                        error.textContent = t("Invalid or duplicate package: {0}. Use name or name=version.", line);
+                        error.classList.remove('hidden');
+                        return;
+                    }
+                    seen.add(match[1]);
+                    const target = match[2] ? (['=', '=='].includes(match[2]) ? match[3] : match[2] + match[3]) : null;
+                    packages.push({ name: match[1], target });
+                }
+            }
+            const button = document.getElementById('pkg-add-btn');
+            button.disabled = true;
+            try {
+                const result = await fetchAPI('/api/pkg', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ pkg_type: type, packages })
+                });
+                if (!result || result.error || result.status !== 'added') {
+                    error.textContent = t("Could not save packages (HTTP {0}).", result?.status || t("network error"));
+                    error.classList.remove('hidden');
+                    return;
+                }
+                closePackageEditor();
+                showToast(t("{0} package(s) queued for installation.", packages.length), 'success');
+                await updatePackages();
+            } finally {
+                button.disabled = false;
+            }
+        });
+
+        async function deleteSelectedPackages() {
+            const ids = [...selectedPackageIds];
+            if (!ids.length || !await customConfirm(t("Remove packages"), t("Remove {0} selected package(s) from the managed list? Installed packages will remain on disk.", ids.length))) return;
+            const result = await fetchAPI('/api/pkg', {
+                method: 'DELETE',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(ids)
+            });
+            if (!result || result.error) {
+                showToast(t("Could not remove packages (HTTP {0}).", result?.status || t("network error")), 'error');
+                return;
+            }
+            ids.forEach(id => selectedPackageIds.delete(id));
+            showToast(t("{0} package(s) removed.", ids.length), 'success');
+            await updatePackages();
+        }
+
+        async function triggerUpdatePackage(type, name, target) {
+            const payload = { pkg_type: type, packages: [{ name, target: target || null }] };
+            const res = await fetchAPI('/api/pkg', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+
+            if (res && !res.error && res.status === 'added') {
+                showToast(t("Update queued: {0}", name), 'success');
+                updatePackages();
+            } else {
+                showToast(t("Failed to update package (HTTP {0}).", res?.status || t("network error")), 'error');
+            }
+        }
+
+        async function confirmDeletePackage(id, name) {
+            if (await customConfirm(t("Delete Package"), t("Are you sure you want to remove \"{0}\" from the managed list?", name))) {
+                deletePackage(id, name);
+            }
+        }
+
+        async function deletePackage(id, name) {
+            const res = await fetchAPI(`/api/pkg/${id}`, { method: 'DELETE' });
+            if (res && res.status === 204 && !res.error) {
+                showToast(t("Package \"{0}\" removed.", name), 'success');
+                updatePackages();
+            } else {
+                showToast(t("Failed to remove package (HTTP {0}).", res?.status || t("network error")), 'error');
+            }
+        }
+
+        // Init
+        updateAuthButton();
+        window.addEventListener('storage', updateAuthButton);
+        updateDashboard();
+        setInterval(() => {
+            if (isPkgManagerEnabled && !document.getElementById('packages-view').classList.contains('hidden') && localStorage.getItem('fc_runtime_id')) {
+                updatePackages();
+            }
+        }, 5000);
+        setInterval(updateDashboard, 5000);
+    </script>
+</body>
+</html>

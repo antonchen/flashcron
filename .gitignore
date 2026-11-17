@@ -1,7 +1,6 @@
 # Rust
 /target/
 **/*.rs.bk
-Cargo.lock
 
 # IDE
 .idea/
@@ -10,15 +9,8 @@ Cargo.lock
 *.swo
 *~
 
-# OS
-.DS_Store
-Thumbs.db
-
 # Build artifacts
-*.exe
-*.dll
 *.so
-*.dylib
 
 # Test artifacts
 *.profraw
@@ -42,6 +34,10 @@ logs/
 .env.local
 
 # Test/simulation files
+docs/plans
 simulation.toml
 test_config.toml
-*.bat
+run_tests.sh
+flashcron.db
+AGENTS.md
+scripts/

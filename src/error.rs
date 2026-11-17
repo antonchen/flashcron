@@ -51,6 +51,35 @@ pub enum Error {
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
 
+    #[error("FlashCron is already running for socket '{path}'")]
+    IpcAlreadyRunning { path: PathBuf },
+
+    #[error("Failed to bind IPC socket '{path}': {source}")]
+    IpcBind {
+        path: PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
+
+    #[error("Failed to connect IPC socket '{path}': {source}")]
+    IpcConnect {
+        path: PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
+
+    #[error("Failed to read IPC response: {source}")]
+    IpcRead {
+        #[source]
+        source: std::io::Error,
+    },
+
+    #[error("Failed to write IPC request: {source}")]
+    IpcWrite {
+        #[source]
+        source: std::io::Error,
+    },
+
     #[error("Channel send error")]
     ChannelSend,
 
@@ -93,6 +122,11 @@ impl Error {
             job_name: name.into(),
             timeout_secs,
         }
+    }
+
+    /// Create an IPC already running error
+    pub fn ipc_already_running(path: impl Into<PathBuf>) -> Self {
+        Self::IpcAlreadyRunning { path: path.into() }
     }
 
     /// Check if this is a shutdown error

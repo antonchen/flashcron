@@ -10,7 +10,7 @@ Be respectful, inclusive, and constructive. We're all here to build something gr
 
 ### Reporting Bugs
 
-1. Check if the bug has already been reported in [Issues](https://github.com/alfredo-baratta/flashcron/issues)
+1. Check if the bug has already been reported in [Issues](https://github.com/antonchen/flashcron/issues)
 2. If not, create a new issue with:
    - Clear, descriptive title
    - Steps to reproduce
@@ -42,14 +42,14 @@ Be respectful, inclusive, and constructive. We're all here to build something gr
 
 ### Prerequisites
 
-- Rust 1.70 or later
+- Rust 1.89.0 or later
 - Git
 
 ### Building
 
 ```bash
 # Clone the repository
-git clone https://github.com/alfredo-baratta/flashcron
+git clone https://github.com/antonchen/flashcron
 cd flashcron
 
 # Build debug version
@@ -120,23 +120,20 @@ Prefixes:
 ```
 flashcron/
 ├── src/
-│   ├── main.rs          # CLI entry point
-│   ├── lib.rs           # Library exports
-│   ├── error.rs         # Error types
-│   ├── config/          # Configuration parsing
-│   │   ├── mod.rs
-│   │   ├── job.rs
-│   │   └── settings.rs
-│   ├── scheduler/       # Core scheduler
-│   │   ├── mod.rs
-│   │   ├── engine.rs
-│   │   └── state.rs
-│   └── executor/        # Job execution
-│       └── mod.rs
-├── tests/               # Integration tests
-├── benches/             # Benchmarks
-├── docs/                # Documentation
-└── examples/            # Example configs
+│   ├── main.rs           # CLI entry point
+│   ├── lib.rs            # Library exports
+│   ├── cmd/              # CLI, daemon lifecycle, logging, and config paths
+│   ├── config/           # Configuration, jobs, and settings
+│   ├── db/               # SQLite persistence
+│   ├── scheduler/        # Scheduling engine, state, and tests
+│   ├── web/               # Dashboard and resource handlers
+│   ├── executor.rs        # Shell job execution
+│   ├── ipc.rs             # Unix socket control protocol
+│   └── dep_manager.rs     # Optional dependency management
+├── tests/integration_tests/ # Integration tests by feature
+├── benches/               # Criterion benchmarks
+├── docs/                  # Documentation
+└── examples/              # Example configuration
 ```
 
 ## Release Process
@@ -144,8 +141,8 @@ flashcron/
 Releases are automated via GitHub Actions when a tag is pushed:
 
 1. Update version in `Cargo.toml`
-2. Update `CHANGELOG.md`
-3. Create and push tag: `git tag v0.1.0 && git push --tags`
+2. Update `docs/CHANGELOG.md`
+3. Create and push the release tag, for example: `git tag vX.Y.Z && git push --tags`
 
 ## Questions?
 

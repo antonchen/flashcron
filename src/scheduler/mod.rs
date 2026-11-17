@@ -4,9 +4,8 @@ mod engine;
 mod state;
 
 pub use engine::{Scheduler, SchedulerHandle};
-pub use state::{ScheduledJob, SchedulerState};
+pub use state::{JobRunState, ScheduledJob, SchedulerState};
 
-use crate::config::Job;
 use chrono::{DateTime, Utc};
 use uuid::Uuid;
 
@@ -14,15 +13,30 @@ use uuid::Uuid;
 #[derive(Debug)]
 pub enum SchedulerMessage {
     /// Trigger a job immediately
-    TriggerJob { job_name: String },
+    TriggerJob {
+        job_name: String,
+        response_tx: tokio::sync::oneshot::Sender<crate::error::Result<Uuid>>,
+    },
+    /// Add or replace one job definition immediately
+    AddOrUpdateJob {
+        job_name: String,
+        job: Box<crate::config::Job>,
+        update: bool,
+        response_tx: tokio::sync::oneshot::Sender<crate::error::Result<bool>>,
+    },
+    /// Remove a job definition immediately
+    RemoveJob {
+        job_name: String,
+        response_tx: tokio::sync::oneshot::Sender<crate::error::Result<()>>,
+    },
     /// Reload configuration
     ReloadConfig,
     /// Get scheduler status
     GetStatus {
         response_tx: tokio::sync::oneshot::Sender<SchedulerState>,
     },
-    /// Stop a running job
-    StopJob { job_name: String },
+    /// Internal signal that a job completed and the queue can advance
+    JobCompleted,
     /// Shutdown the scheduler
     Shutdown,
 }
@@ -48,6 +62,13 @@ pub enum SchedulerEvent {
         execution_id: Uuid,
         error: String,
     },
+    /// Updated bounded output preview for a running job
+    JobOutput {
+        job_name: String,
+        execution_id: Uuid,
+        sequence: u64,
+        output: String,
+    },
     /// Configuration reloaded
     ConfigReloaded { job_count: usize },
     /// Scheduler started
@@ -63,23 +84,15 @@ pub struct JobTrigger {
     pub job_name: String,
     /// Scheduled time
     pub scheduled_at: DateTime<Utc>,
-    /// The job configuration
-    pub job: Job,
 }
 
 impl JobTrigger {
     /// Create a new job trigger
-    pub fn new(job_name: String, scheduled_at: DateTime<Utc>, job: Job) -> Self {
+    pub fn new(job_name: String, scheduled_at: DateTime<Utc>) -> Self {
         Self {
             job_name,
             scheduled_at,
-            job,
         }
-    }
-
-    /// Check if this trigger is due
-    pub fn is_due(&self) -> bool {
-        Utc::now() >= self.scheduled_at
     }
 
     /// Get milliseconds until this trigger is due

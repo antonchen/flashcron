@@ -6,16 +6,21 @@
 //!
 //! - **Efficient**: Minimal memory footprint (~2-5MB), fast startup
 //! - **Simple**: TOML configuration, intuitive CLI
-//! - **Observable**: Built-in logging, optional Prometheus metrics
+//! - **Observable**: Built-in logging and Web API/Dashboard
 //! - **Reliable**: Graceful shutdown, job timeout handling, automatic retry
-//! - **Cross-platform**: Linux, macOS, Windows support
+//! - **Linux-only**: Native process management and local Unix socket control
 
-#[cfg(feature = "web")]
-pub mod api;
 pub mod config;
+pub mod db;
 pub mod error;
 pub mod executor;
+pub mod ipc;
 pub mod scheduler;
+#[cfg(feature = "web")]
+pub mod web;
+
+#[cfg(feature = "dep-manager")]
+pub mod dep_manager;
 
 pub use config::Config;
 pub use error::{Error, Result};

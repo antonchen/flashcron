@@ -23,7 +23,7 @@ fn execution(job_name: String) -> JobExecution {
 fn seed_history(runtime: &Runtime, db: &DatabaseManager, count: usize) {
     for index in 0..count {
         let exec = execution(format!("job-{index}"));
-        runtime.block_on(db.save(exec, true)).unwrap();
+        runtime.block_on(db.save(exec, 100, 10000)).unwrap();
     }
 }
 
@@ -38,7 +38,7 @@ fn bench_sqlite(c: &mut Criterion) {
                 (db, execution("bench-job".to_owned()), temp_dir)
             },
             |(db, exec, temp_dir)| {
-                black_box(runtime.block_on(db.save(exec, true)).unwrap());
+                black_box(runtime.block_on(db.save(exec, 100, 10000)).unwrap());
                 (db, temp_dir)
             },
             BatchSize::PerIteration,

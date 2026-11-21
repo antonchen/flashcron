@@ -147,7 +147,7 @@ async fn test_persistence_recovery() {
     let db = DatabaseManager::init(&db_path).await.unwrap();
     let mut exec = JobExecution::new("test-job", "manual");
     exec.complete_success(0, Some("ok".into()));
-    db.save(exec, true).await.unwrap();
+    db.save(exec, 100, 10000).await.unwrap();
 
     // 2. Initialize scheduler with this DB
     let config_str = r#"

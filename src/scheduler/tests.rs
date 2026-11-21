@@ -31,6 +31,136 @@ async fn test_scheduler_creation() {
     assert!(handle.trigger_job("test").await.is_ok());
 }
 
+#[tokio::test]
+async fn final_failure_hook_receives_one_json_message_after_retries() {
+    use std::fs;
+    use std::os::unix::fs::PermissionsExt;
+    use std::time::Duration;
+
+    let temp_dir = tempfile::tempdir_in("/tmp").unwrap();
+    let hook_path = temp_dir.path().join("failure-hook");
+    fs::write(
+        &hook_path,
+        "#!/bin/sh\nbase=${0%/*}\ncat > \"$base/message\"\nprintf 'called\\n' >> \"$base/count\"\n",
+    )
+    .unwrap();
+    fs::set_permissions(&hook_path, fs::Permissions::from_mode(0o755)).unwrap();
+
+    let mut config = Config::from_str(
+        r#"
+            [jobs.failure]
+            schedule = "* * * * *"
+            command = "printf 'failure output'; exit 7"
+            run_on_startup = true
+            retry_count = 1
+            retry_delay = 0
+        "#,
+        "test.toml",
+    )
+    .unwrap();
+    config.settings.failure_hook = Some(hook_path);
+
+    let (scheduler, handle) = Scheduler::new(config, PathBuf::from("test.toml"), None);
+    let worker = tokio::spawn(scheduler.run());
+
+    tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            let state = handle.get_status().await.unwrap();
+            if matches!(
+                state.jobs["failure"].last_status,
+                Some(JobStatus::Failed { .. })
+            ) {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("job did not reach its final failed state");
+
+    let count_path = temp_dir.path().join("count");
+    tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            if tokio::fs::try_exists(&count_path).await.unwrap() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("failure hook was not called");
+
+    let message: serde_json::Value = serde_json::from_slice(
+        &tokio::fs::read(temp_dir.path().join("message"))
+            .await
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(message.as_object().unwrap().len(), 7);
+    assert_eq!(message["event"], "job.failed");
+    assert_eq!(message["job_name"], "failure");
+    assert_eq!(message["trigger"], "startup");
+    assert!(chrono::DateTime::parse_from_rfc3339(message["ended_at"].as_str().unwrap()).is_ok());
+    assert_eq!(message["attempt"], 2);
+    assert_eq!(message["error"], "exit_code");
+    assert_eq!(message["output"], "failure output");
+    assert_eq!(
+        tokio::fs::read_to_string(count_path).await.unwrap(),
+        "called\n"
+    );
+
+    handle.shutdown().await.unwrap();
+    worker.await.unwrap().unwrap();
+}
+
+#[tokio::test]
+async fn failure_hook_timeout_kills_and_reaps_child() {
+    use std::os::unix::fs::PermissionsExt;
+    use std::time::Duration;
+
+    let temp_dir = tempfile::tempdir_in("/tmp").unwrap();
+    let hook_path = temp_dir.path().join("failure-hook");
+    let pid_path = temp_dir.path().join("pid");
+    std::fs::write(
+        &hook_path,
+        format!(
+            "#!/bin/sh\necho $$ > '{}'\nexec sleep 30\n",
+            pid_path.display()
+        ),
+    )
+    .unwrap();
+    std::fs::set_permissions(&hook_path, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+    let mut child = tokio::process::Command::new(&hook_path)
+        .stdin(std::process::Stdio::piped())
+        .kill_on_drop(true)
+        .spawn()
+        .unwrap();
+    tokio::time::timeout(Duration::from_secs(2), async {
+        while !pid_path.exists() {
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+    })
+    .await
+    .expect("hook did not start");
+    let pid = std::fs::read_to_string(pid_path)
+        .unwrap()
+        .trim()
+        .parse::<i32>()
+        .unwrap();
+
+    let result = run_failure_hook_child(
+        &mut child,
+        b"{}\n",
+        Duration::from_millis(50),
+        "timeout-test",
+    )
+    .await;
+
+    assert!(result.unwrap().is_none(), "hook should time out");
+    assert!(nix::sys::signal::kill(nix::unistd::Pid::from_raw(pid), None).is_err());
+}
+
 #[cfg(feature = "web")]
 #[tokio::test]
 async fn test_add_or_update_job_applies_runtime_definition() {
@@ -46,6 +176,7 @@ async fn test_add_or_update_job_applies_runtime_definition() {
                 ..Job::default()
             },
             false,
+            None,
         )
         .await
         .unwrap();
@@ -62,6 +193,7 @@ async fn test_add_or_update_job_applies_runtime_definition() {
                 ..Job::default()
             },
             true,
+            None,
         )
         .await
         .unwrap();
@@ -103,11 +235,11 @@ async fn test_deleted_job_is_not_recreated_by_pending_update() {
         ..Job::default()
     };
     assert!(handle
-        .add_or_update_job("web-job".into(), job.clone(), false)
+        .add_or_update_job("web-job".into(), job.clone(), false, None)
         .await
         .unwrap());
     assert!(!handle
-        .add_or_update_job("web-job".into(), job.clone(), false)
+        .add_or_update_job("web-job".into(), job.clone(), false, None)
         .await
         .unwrap());
     // Queue both operations before waiting, as concurrent HTTP handlers can do.
@@ -125,6 +257,7 @@ async fn test_deleted_job_is_not_recreated_by_pending_update() {
             job_name: "web-job".into(),
             job: Box::new(job),
             update: true,
+            rename_from: None,
             response_tx: update_tx,
         })
         .await
@@ -182,7 +315,7 @@ async fn test_scheduler_counts_reset_after_restart() {
     let db = DatabaseManager::init(&db_path).await.unwrap();
     let mut exec = JobExecution::new("test-job", "manual");
     exec.complete_success(0, Some("ok".into()));
-    db.save(exec, true).await.unwrap();
+    db.save(exec, 100, 10000).await.unwrap();
 
     // 2. Initialize scheduler with this DB
     // Match config job name to our saved DB name

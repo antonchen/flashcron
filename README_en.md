@@ -174,13 +174,14 @@ json_logs = false            # JSON format for log aggregators
 # Web only
 api_host = "0.0.0.0"       # Web Dashboard / API host
 api_port = 8080              # Web Dashboard / API port
-api_token = "secret"         # API Auth Token (random UUID if not set, printed on startup)
+api_token = "secret"         # API Auth Token (random UUID is persisted if not set)
+# failure_hook = "/usr/local/bin/flashcron-failure-hook"  # Called after final failure; JSON is sent on stdin
 sql_file = "flashcron.db"    # SQLite database file path
 script_dir = "scripts"       # Web script directory; managed files use mode 0755
 max_concurrent_jobs = 10     # 0 = unlimited
 shell = "/bin/sh"            # Default shell
 job_history_size = 100         # Max history entries to keep per job
-max_history_size = 10000       # Max total history entries to keep globally, 0 = disable persisted history output
+max_history_size = 10000       # Max total history entries to keep globally, 0 = disable execution history
 timezone = "System"          # Timezone (e.g., "System", "UTC", "Asia/Shanghai")
 shutdown_timeout = 30   # Seconds to wait on shutdown
 print_output = false         # Whether to print job output to logs
@@ -207,8 +208,6 @@ max_output_size = 1048576    # Max stdout/stderr capture (bytes)
 run_on_startup = false       # Run immediately on daemon start
 print_output = false         # Override global print_output setting
 ```
-
-If a job is already in `queued`, `starting`, or `running`, the next cron tick for the same job is skipped. Different jobs can wait in the global queue when `max_concurrent_jobs` is saturated.
 
 ### Cron Expression Format
 

@@ -44,9 +44,14 @@
                         <button type="button" id="nav-scripts" onclick="toggleScripts()" class="rounded px-3 py-1.5 text-sm font-medium text-indigo-100 hover:bg-indigo-600 hover:text-white" data-i18n="Scripts">Scripts</button>
                         <button type="button" id="nav-packages" onclick="showPackagesView()" class="__DEP_MANAGER_HIDDEN__ rounded px-3 py-1.5 text-sm font-medium text-indigo-100 hover:bg-indigo-600 hover:text-white" data-i18n="Packages">Packages</button>
                     </div>
-                    <button type="button" id="auth-toggle" onclick="toggleAuthentication()" class="p-2 hover:bg-white/10 rounded-full transition-colors">
-                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"/></svg>
-                    </button>
+                    <div class="flex items-center gap-1">
+                        <button type="button" onclick="openSettings()" class="p-2 hover:bg-white/10 rounded-full transition-colors" title="Settings" data-i18n-title="Settings" aria-label="Settings" data-i18n-aria-label="Settings">
+                            <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12.22 2h-.44a2 2 0 0 0-2 1.72l-.11.84a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.7-.4a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.7.4a2 2 0 0 1 1 1.73v.5a2 2 0 0 1-1 1.73l-.7.4a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.7-.4a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73l.11.84A2 2 0 0 0 11.78 22h.44a2 2 0 0 0 2-1.72l.11-.84a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.7.4a2 2 0 0 0 2.73-.73l.22-.38a2 2 0 0 0-.73-2.73l-.7-.4a2 2 0 0 1-1-1.73v-.5a2 2 0 0 1 1-1.73l.7-.4a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.7.4a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73l-.11-.84A2 2 0 0 0 12.22 2z"/><circle cx="12" cy="12" r="3"/></svg>
+                        </button>
+                        <button type="button" id="auth-toggle" onclick="toggleAuthentication()" class="p-2 hover:bg-white/10 rounded-full transition-colors">
+                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="m16 17 5-5-5-5"/><path d="M21 12H9"/></svg>
+                        </button>
+                    </div>
                 </div>
             </div>
         </div>
@@ -306,6 +311,27 @@
         </form>
     </div>
 
+    <div id="settings-modal" class="fixed inset-0 bg-black/60 hidden flex items-center justify-center z-50 p-4" role="dialog" aria-modal="true" aria-labelledby="settings-title">
+        <form id="settings-form" class="bg-white rounded-md shadow-xl w-full max-w-xl overflow-hidden">
+            <div class="p-6 space-y-4">
+                <div class="flex items-center justify-between">
+                    <h2 id="settings-title" class="text-lg font-semibold" data-i18n="Settings">Settings</h2>
+                    <button type="button" onclick="closeModal('settings-modal')" class="p-1 text-gray-500 hover:text-gray-800" title="Close" data-i18n-title="Close" aria-label="Close" data-i18n-aria-label="Close">×</button>
+                </div>
+                <label class="block text-sm" for="settings-failure-hook">
+                    <span data-i18n="Failure notification script">Failure notification script</span>
+                    <input id="settings-failure-hook" type="text" autocomplete="off" class="mt-1 w-full border border-gray-300 rounded px-3 py-2 font-mono" placeholder="/usr/local/bin/flashcron-failure-hook" disabled>
+                </label>
+                <p class="text-sm text-gray-500" data-i18n="Executable script path in the FlashCron server environment. Leave blank to disable.">Executable script path in the FlashCron server environment. Leave blank to disable.</p>
+                <p id="settings-error" class="hidden text-sm text-red-700" role="alert"></p>
+            </div>
+            <div class="px-6 py-4 bg-gray-50 flex justify-end gap-2">
+                <button type="button" onclick="closeModal('settings-modal')" class="px-3 py-2 border border-gray-300 rounded" data-i18n="Cancel">Cancel</button>
+                <button type="submit" id="settings-save" class="px-3 py-2 bg-indigo-600 text-white rounded disabled:opacity-50" disabled data-i18n="Save">Save</button>
+            </div>
+        </form>
+    </div>
+
     <!-- Toast Container -->
     <div id="toast-container" class="fixed bottom-6 right-6 flex flex-col gap-3 z-[100]"></div>
 
@@ -383,6 +409,28 @@
             "Please enter your Token to continue.": "请输入 Token 以继续。",
             "Verify": "验证",
             "Dashboard pages": "控制台页面",
+            "Settings": "设置",
+            "Failure notification script": "失败通知脚本",
+            "Executable script path in the FlashCron server environment. Leave blank to disable.": "填写 FlashCron 服务端环境中的可执行脚本路径，留空则关闭。",
+            "Save": "保存",
+            "Settings saved.": "设置已保存。",
+            "Could not load settings.": "无法加载设置。",
+            "Could not save settings.": "无法保存设置。",
+            "A job with this name already exists.": "已存在同名任务。",
+            "A script with this name already exists.": "已存在同名脚本。",
+            "Wait for the job to finish before renaming it.": "请等待任务执行完毕后再修改名称。",
+            "Job no longer exists.": "任务已不存在。",
+            "Script no longer exists.": "脚本已不存在。",
+            "Invalid script name.": "脚本名称无效。",
+            "Use 1-128 letters, digits, dots, hyphens or underscores for the job name.": "任务名称须为 1–128 个字母、数字、点、连字符或下划线。",
+            "Invalid request. Check the entered values.": "请求无效，请检查输入内容。",
+            "The requested item no longer exists.": "请求的项目已不存在。",
+            "The item is busy or the name already exists.": "项目正在使用中或名称已存在。",
+            "The submitted content is too large.": "提交的内容过大。",
+            "Server error. Check the service logs.": "服务器错误，请查看服务日志。",
+            "Service unavailable. Wait for dependency restoration.": "服务暂不可用，请等待依赖恢复完成。",
+            "Rename script": "修改脚本名称",
+            "Update job commands that reference this script after renaming.": "改名后请同步修改引用此脚本的任务命令。",
             "Logout": "退出",
             "Login": "登录",
             "Invalid Token. Please try again.": "Token 无效，请重试。",
@@ -682,7 +730,8 @@
                 }
 
                 if (!res.ok) {
-                    return { error: true, status: res.status };
+                    const body = await res.text();
+                    return { error: true, status: res.status, message: body.trim() };
                 }
 
                 if (res.status === 204) {
@@ -695,6 +744,70 @@
                 return { error: true, message: err.message };
             }
         }
+
+        function apiError(result) {
+            if (result?.message) return t(result.message);
+            return t({
+                400: 'Invalid request. Check the entered values.',
+                401: 'Unauthorized Access',
+                404: 'The requested item no longer exists.',
+                409: 'The item is busy or the name already exists.',
+                413: 'The submitted content is too large.',
+                422: 'Invalid request. Check the entered values.',
+                500: 'Server error. Check the service logs.',
+                503: 'Service unavailable. Wait for dependency restoration.'
+            }[result?.status] || 'Connection Error');
+        }
+
+        async function openSettings() {
+            const input = document.getElementById('settings-failure-hook');
+            const save = document.getElementById('settings-save');
+            const error = document.getElementById('settings-error');
+            input.value = '';
+            input.disabled = true;
+            save.disabled = true;
+            error.classList.add('hidden');
+            const settings = await fetchAPI('/api/settings');
+            if (!settings || settings.error) {
+                if (settings?.status === 401) return;
+                openModal('settings-modal');
+                error.textContent = apiError(settings);
+                error.classList.remove('hidden');
+                return;
+            }
+
+            openModal('settings-modal');
+            input.value = settings.failure_hook || '';
+            input.disabled = false;
+            save.disabled = false;
+            input.focus();
+        }
+
+        document.getElementById('settings-form').addEventListener('submit', async event => {
+            event.preventDefault();
+            const input = document.getElementById('settings-failure-hook');
+            const save = document.getElementById('settings-save');
+            const error = document.getElementById('settings-error');
+            error.classList.add('hidden');
+            save.disabled = true;
+
+            const result = await fetchAPI('/api/settings', {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ failure_hook: input.value.trim() || null })
+            });
+
+            save.disabled = false;
+            if (!result || result.error) {
+                error.textContent = apiError(result);
+                error.classList.remove('hidden');
+                return;
+            }
+
+            input.value = result.failure_hook || '';
+            closeModal('settings-modal');
+            showToast(t('Settings saved.'), 'success');
+        });
 
         function setTab(tab) {
             activeTab = tab;
@@ -762,7 +875,7 @@
             editingJob = job;
             document.getElementById('job-editor-title').innerText = job ? t("Edit {0}", job.name) : t("Add job");
             document.getElementById('job-name').value = job?.name || '';
-            document.getElementById('job-name').readOnly = Boolean(job);
+            document.getElementById('job-name').readOnly = false;
             document.getElementById('job-schedule').value = job?.schedule || '*/5 * * * *';
             document.getElementById('job-description').value = job?.description || '';
             document.getElementById('job-command').value = job?.command || '';
@@ -786,7 +899,7 @@
         async function editJob(name) {
             const job = await fetchAPI(`/api/jobs/${encodeURIComponent(name)}`);
             if (!job || job.error) {
-                showToast(t("Could not load job (HTTP {0}).", job?.status || t("network error")), 'error');
+                showToast(apiError(job), 'error');
                 return;
             }
             openJobEditor(job);
@@ -842,14 +955,14 @@
                 enabled: document.getElementById('job-enabled').checked,
                 run_on_startup: document.getElementById('job-run-on-startup').checked
             };
-            const result = await fetchAPI(editingJob ? `/api/jobs/${encodeURIComponent(name)}` : '/api/jobs', {
+            const result = await fetchAPI(editingJob ? `/api/jobs/${encodeURIComponent(editingJob.name)}` : '/api/jobs', {
                 method: editingJob ? 'PUT' : 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ ...payload, ...(editingJob ? {} : { name }) })
+                body: JSON.stringify({ ...payload, name })
             });
             if (result?.error) {
                 const error = document.getElementById('job-form-error');
-                error.innerText = result.status === 400 ? t("Invalid job name, command, or schedule.") : t("Save failed (HTTP {0}).", result.status || t("network error"));
+                error.innerText = apiError(result);
                 error.classList.remove('hidden');
                 return;
             }
@@ -873,7 +986,7 @@
             if (!await customConfirm(t("Delete job"), t("Delete \"{0}\" and its saved history?", name))) return;
             const result = await fetchAPI(`/api/jobs/${encodeURIComponent(name)}`, { method: 'DELETE' });
             if (result?.error || result?.status !== 204) {
-                showToast(t("Could not delete job (HTTP {0}).", result?.status || t("network error")), 'error');
+                showToast(apiError(result), 'error');
                 return;
             }
             if (currentJob === name) currentJob = null;
@@ -885,7 +998,7 @@
             if (!await customConfirm(t("Delete script"), t("Delete \"{0}\"? Jobs that reference it will fail until updated.", name))) return;
             const result = await fetchAPI(`/api/scripts/${encodeURIComponent(name)}`, { method: 'DELETE' });
             if (result?.error || result?.status !== 204) {
-                showToast(t("Could not delete script (HTTP {0}).", result?.status || t("network error")), 'error');
+                showToast(apiError(result), 'error');
                 return;
             }
             showToast(t("Script \"{0}\" deleted.", name), 'success');
@@ -915,7 +1028,7 @@
             if (name) {
                 const result = await fetchAPI(`/api/scripts/${encodeURIComponent(name)}`);
                 if (!result || result.error) {
-                    showToast(t("Could not read script (HTTP {0}).", result?.status || t("network error")), 'error');
+                    showToast(apiError(result), 'error');
                     return;
                 }
                 content = result;
@@ -924,7 +1037,8 @@
             }
             document.getElementById('script-editor-title').innerText = name ? t("Edit {0}", name) : t("Add script");
             document.getElementById('script-name').value = name || '';
-            document.getElementById('script-name').readOnly = Boolean(name);
+            document.getElementById('script-name').readOnly = false;
+            document.getElementById('script-name').dataset.originalName = name || '';
             document.getElementById('script-content').value = content;
             document.getElementById('script-form-error').classList.add('hidden');
             document.getElementById('script-editor').classList.remove('hidden');
@@ -937,14 +1051,18 @@
         document.getElementById('script-form').addEventListener('submit', async (event) => {
             event.preventDefault();
             const name = document.getElementById('script-name').value.trim();
-            const result = await fetchAPI(`/api/scripts/${encodeURIComponent(name)}`, {
+            const originalName = document.getElementById('script-name').dataset.originalName;
+            const renaming = originalName && originalName !== name;
+            if (renaming && !await customConfirm(t('Rename script'), t('Update job commands that reference this script after renaming.'))) return;
+            const query = renaming ? `?original_name=${encodeURIComponent(originalName)}` : '';
+            const result = await fetchAPI(`/api/scripts/${encodeURIComponent(name)}${query}`, {
                 method: 'PUT',
                 headers: { 'Content-Type': 'text/plain' },
                 body: document.getElementById('script-content').value
             });
             if (result?.error) {
                 const error = document.getElementById('script-form-error');
-                error.innerText = t("Could not save script (HTTP {0}).", result.status || t("network error"));
+                error.innerText = apiError(result);
                 error.classList.remove('hidden');
                 return;
             }
@@ -956,7 +1074,7 @@
         async function toggleJob(name, enabled) {
             const job = await fetchAPI(`/api/jobs/${encodeURIComponent(name)}`);
             if (!job || job.error) {
-                showToast(t("Could not load job (HTTP {0}).", job?.status || t("network error")), 'error');
+                showToast(apiError(job), 'error');
                 return;
             }
             job.enabled = enabled;
@@ -966,7 +1084,7 @@
                 body: JSON.stringify(job)
             });
             if (result?.error) {
-                showToast(t("Could not update job (HTTP {0}).", result.status || t("network error")), 'error');
+                showToast(apiError(result), 'error');
                 return;
             }
             showToast(enabled ? t("Job enabled.") : t("Job disabled."), 'success');
@@ -1027,12 +1145,13 @@
                     showToast(t("Started {0}. Waiting for result...", name), 'info');
                     updateDashboard();
                     if (res.execution_id) {
+                        showLiveLogs(name, res.execution_id);
                         pollJobStatus(name, res.execution_id);
                     }
                 } else if (res && res.status === 401) {
                     showToast(t("Unauthorized Access"), "error");
                 } else {
-                    showToast(t("Failed to run \"{0}\"", name), "error");
+                    showToast(apiError(res), "error");
                 }
             } catch (err) {
                 showToast(t("Connection Error"), "error");
@@ -1155,7 +1274,7 @@
                             ? 'text-yellow-600 bg-yellow-50 hover:bg-yellow-100'
                             : 'text-green-700 bg-green-50 hover:bg-green-100',
                             () => toggleJob(job.name, !job.enabled));
-                        if (!job.enabled) addAction(t("Run"), 'text-indigo-600 hover:text-indigo-900 bg-indigo-50 hover:bg-indigo-100', (event) => triggerJob(event, job.name));
+                        addAction(t("Run"), 'text-indigo-600 hover:text-indigo-900 bg-indigo-50 hover:bg-indigo-100', (event) => triggerJob(event, job.name));
                         tbody.appendChild(tr);
                     });
                 }
@@ -1293,24 +1412,46 @@
             }
         }
 
-        async function showLiveLogs(name) {
+        async function showLiveLogs(name, executionId = null) {
             liveOutputAbort?.abort();
             const controller = new AbortController();
             liveOutputAbort = controller;
-            const endpoint = `/api/jobs/${encodeURIComponent(name)}/output/stream`;
+            const executionQuery = executionId ? `?execution_id=${encodeURIComponent(executionId)}` : '';
+            const endpoint = `/api/jobs/${encodeURIComponent(name)}/output/stream${executionQuery}`;
             const connect = () => fetch(endpoint, {
                 signal: controller.signal,
                 headers: { 'Runtime-Id': localStorage.getItem('fc_runtime_id') || '' }
             });
+            openModal('modal');
+            const content = document.getElementById('modal-content');
+            content.textContent = `${t('Job')}: ${name}\n${t('Status')}: ${t('Starting')}\n\n${t('Waiting for output…')}`;
             try {
-                let response = await connect();
-                if (response.status === 401) {
-                    if (!await requestToken()) return;
+                let response;
+                while (!controller.signal.aborted) {
                     response = await connect();
+                    if (response.status === 401) {
+                        if (!await requestToken()) {
+                            closeModal('modal');
+                            return;
+                        }
+                        continue;
+                    }
+                    if (response.status === 409) {
+                        if (executionId) {
+                            const state = await fetchAPI('/api/status');
+                            const job = state?.jobs?.[name];
+                            if (!job || job.current_execution_id !== executionId || !['Queued', 'Starting'].includes(job.run_state)) {
+                                closeModal('modal');
+                                return;
+                            }
+                        }
+                        await new Promise(resolve => setTimeout(resolve, 150));
+                        continue;
+                    }
+                    break;
                 }
+                if (controller.signal.aborted) return;
                 if (!response.ok) throw new Error(t("Could not load live output (HTTP {0}).", response.status));
-                openModal('modal');
-                const content = document.getElementById('modal-content');
                 content.textContent = `${t('Job')}: ${name}\n${t('Status')}: ${t('Running')}\n\n${t('Waiting for output…')}`;
                 const reader = response.body.getReader();
                 const decoder = new TextDecoder();
@@ -1337,7 +1478,10 @@
                     }
                 }
             } catch (error) {
-                if (error.name !== 'AbortError') showToast(error.message, 'error');
+                if (error.name !== 'AbortError') {
+                    closeModal('modal');
+                    showToast(error.message, 'error');
+                }
             }
         }
 
@@ -1354,7 +1498,7 @@
         async function updatePackageSources() {
             const sources = await fetchAPI('/api/pkg/sources');
             if (!sources || sources.error) {
-                showToast(t("Could not load package sources (HTTP {0}).", sources?.status || t("network error")), 'error');
+                showToast(apiError(sources), 'error');
                 return;
             }
             document.getElementById('apt-mirror-input').value = sources.apt_mirror || '';
@@ -1369,7 +1513,7 @@
                 body: JSON.stringify({ kind, value })
             });
             if (result?.error || result?.status !== 204) {
-                showToast(t("Could not save package source (HTTP {0}).", result?.status || t("network error")), 'error');
+                showToast(apiError(result), 'error');
                 return;
             }
             showToast(kind === 'apt' ? t("APT mirror saved.") : t("PIP index saved."), 'success');
@@ -1579,7 +1723,7 @@
                     body: JSON.stringify({ pkg_type: type, packages })
                 });
                 if (!result || result.error || result.status !== 'added') {
-                    error.textContent = t("Could not save packages (HTTP {0}).", result?.status || t("network error"));
+                    error.textContent = apiError(result);
                     error.classList.remove('hidden');
                     return;
                 }
@@ -1600,7 +1744,7 @@
                 body: JSON.stringify(ids)
             });
             if (!result || result.error) {
-                showToast(t("Could not remove packages (HTTP {0}).", result?.status || t("network error")), 'error');
+                showToast(apiError(result), 'error');
                 return;
             }
             ids.forEach(id => selectedPackageIds.delete(id));

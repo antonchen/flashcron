@@ -133,6 +133,30 @@ impl DatabaseManager {
     }
 
     #[cfg(feature = "web")]
+    pub async fn rename_job(&self, old_name: String, name: String, job: Job) -> Result<bool> {
+        let definition =
+            serde_json::to_string(&job).map_err(|error| Error::Config(error.to_string()))?;
+        self.conn
+            .call(move |conn| -> rusqlite::Result<bool> {
+                let tx = conn.unchecked_transaction()?;
+                let changed = tx.execute(
+                    "UPDATE jobs SET name = ?2, definition = ?3 WHERE name = ?1",
+                    params![old_name, name, definition],
+                )?;
+                if changed == 1 {
+                    tx.execute(
+                        "UPDATE job_history SET job_name = ?2 WHERE job_name = ?1",
+                        params![old_name, name],
+                    )?;
+                }
+                tx.commit()?;
+                Ok(changed == 1)
+            })
+            .await
+            .map_err(|error| Error::Config(error.to_string()))
+    }
+
+    #[cfg(feature = "web")]
     pub async fn delete_job(&self, name: &str) -> Result<bool> {
         let name = name.to_owned();
         self.conn
@@ -150,8 +174,16 @@ impl DatabaseManager {
             .map_err(|e| Error::Config(e.to_string()))
     }
 
-    /// Save execution results to history
-    pub async fn save(&self, exec: JobExecution, persist_history: bool) -> Result<()> {
+    /// Save execution results and trim history in the same transaction.
+    pub async fn save(
+        &self,
+        exec: JobExecution,
+        job_history_size: usize,
+        max_history_size: usize,
+    ) -> Result<()> {
+        if max_history_size == 0 {
+            return Ok(());
+        }
         let execution_id = exec.id.to_string();
         let job_name = exec.job_name.clone();
         let trigger = exec.trigger.clone();
@@ -161,14 +193,27 @@ impl DatabaseManager {
         let output = exec.output.clone();
 
         self.conn.call(move |conn| -> rusqlite::Result<_> {
-            if persist_history {
-                conn.execute(
+            let tx = conn.transaction()?;
+            tx.execute(
                     "INSERT INTO job_history (execution_id, job_name, trigger_source, start_time, duration_ms, exit_code, output)
                      VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
                     params![execution_id, job_name, trigger, start_time, duration, exit_code, output],
-                )?;
-            }
-
+            )?;
+            tx.execute(
+                "DELETE FROM job_history WHERE rowid IN (
+                    SELECT rowid FROM job_history WHERE job_name = ?1
+                    ORDER BY start_time DESC, rowid DESC LIMIT -1 OFFSET ?2
+                )",
+                params![job_name, job_history_size],
+            )?;
+            tx.execute(
+                "DELETE FROM job_history WHERE rowid IN (
+                    SELECT rowid FROM job_history
+                    ORDER BY start_time DESC, rowid DESC LIMIT -1 OFFSET ?1
+                )",
+                params![max_history_size],
+            )?;
+            tx.commit()?;
             Ok(())
         })
         .await
@@ -187,7 +232,7 @@ impl DatabaseManager {
                     let mut stmt = conn.prepare(
                         "SELECT execution_id, job_name, trigger_source, start_time, duration_ms, exit_code, '' as output
                          FROM job_history
-                         ORDER BY start_time DESC
+                         ORDER BY start_time DESC, rowid DESC
                          LIMIT ?1",
                     )?;
                     let rows = stmt.query_map(params![limit], Self::map_row_to_execution)?;
@@ -201,7 +246,7 @@ impl DatabaseManager {
                         "SELECT execution_id, job_name, trigger_source, start_time, duration_ms, exit_code, '' as output
                          FROM job_history
                          WHERE job_name = ?1
-                         ORDER BY start_time DESC
+                         ORDER BY start_time DESC, rowid DESC
                          LIMIT ?2",
                     )?;
                     let rows = stmt.query_map(params![job_name, limit], Self::map_row_to_execution)?;
@@ -211,6 +256,23 @@ impl DatabaseManager {
                     }
                     Ok(results)
                 }
+            })
+            .await
+            .map_err(|e| Error::Config(e.to_string()))
+    }
+
+    #[cfg(feature = "web")]
+    pub async fn execution_counts(&self) -> Result<(u64, u64)> {
+        self.conn
+            .call(|conn| {
+                conn.query_row(
+                    "SELECT
+                        COALESCE(SUM(CASE WHEN exit_code = 0 THEN 1 ELSE 0 END), 0),
+                        COALESCE(SUM(CASE WHEN exit_code IS NULL OR exit_code != 0 THEN 1 ELSE 0 END), 0)
+                     FROM job_history",
+                    [],
+                    |row| Ok((row.get(0)?, row.get(1)?)),
+                )
             })
             .await
             .map_err(|e| Error::Config(e.to_string()))
@@ -296,7 +358,7 @@ impl DatabaseManager {
                         SELECT execution_id FROM (
                             SELECT execution_id FROM job_history 
                             WHERE job_name = ?1 
-                            ORDER BY start_time DESC 
+                            ORDER BY start_time DESC, rowid DESC
                             LIMIT ?2
                         )
                     )",
@@ -304,13 +366,13 @@ impl DatabaseManager {
                     )?;
                 }
 
-                // 2. Global limit: max_history_size (use a very large number for LIMIT)
+                // 2. Global limit
                 tx.execute(
                     "DELETE FROM job_history WHERE execution_id IN (
                     SELECT execution_id FROM (
                         SELECT execution_id FROM job_history 
-                        ORDER BY start_time DESC 
-                        LIMIT 999999999 OFFSET ?1
+                        ORDER BY start_time DESC, rowid DESC
+                        LIMIT -1 OFFSET ?1
                     )
                 )",
                     params![max_history_size],
@@ -372,7 +434,7 @@ mod tests {
         let exec = mock_execution("test-job", true);
         let id = exec.id;
 
-        db.save(exec, true).await.unwrap();
+        db.save(exec, 100, 10000).await.unwrap();
 
         let details = db.get(id).await.unwrap().unwrap();
         assert_eq!(details.job_name, "test-job");
@@ -404,7 +466,7 @@ mod tests {
     async fn test_db_skip_history_payload_when_persistence_disabled() {
         let (db, _temp) = setup_db().await;
 
-        db.save(mock_execution("test-job", true), false)
+        db.save(mock_execution("test-job", true), 100, 0)
             .await
             .unwrap();
 
@@ -418,7 +480,9 @@ mod tests {
 
         // Save 5 executions
         for _ in 0..5 {
-            db.save(mock_execution("job-1", true), true).await.unwrap();
+            db.save(mock_execution("job-1", true), 100, 10000)
+                .await
+                .unwrap();
         }
 
         // Cleanup: keep only 2 per job

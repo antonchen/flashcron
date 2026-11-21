@@ -22,11 +22,17 @@ pub enum SchedulerMessage {
         job_name: String,
         job: Box<crate::config::Job>,
         update: bool,
+        rename_from: Option<String>,
         response_tx: tokio::sync::oneshot::Sender<crate::error::Result<bool>>,
     },
     /// Remove a job definition immediately
     RemoveJob {
         job_name: String,
+        response_tx: tokio::sync::oneshot::Sender<crate::error::Result<()>>,
+    },
+    #[cfg(feature = "web")]
+    SetFailureHook {
+        path: Option<std::path::PathBuf>,
         response_tx: tokio::sync::oneshot::Sender<crate::error::Result<()>>,
     },
     /// Reload configuration

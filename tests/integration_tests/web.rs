@@ -31,6 +31,58 @@ async fn wait_for_daemon_ready(config_path: &std::path::Path) {
 }
 
 #[cfg(feature = "web")]
+fn write_test_web_config(
+    temp: &tempfile::TempDir,
+    failure_hook: Option<&std::path::Path>,
+    max_concurrent_jobs: Option<usize>,
+) -> (std::path::PathBuf, std::path::PathBuf, u16) {
+    let config_path = temp.path().join("flashcron.toml");
+    let db_path = temp.path().join("flashcron.db");
+    let port = std::net::TcpListener::bind("127.0.0.1:0")
+        .unwrap()
+        .local_addr()
+        .unwrap()
+        .port();
+    let mut settings = format!(
+        "sql_file = {:?}\napi_host = \"127.0.0.1\"\napi_port = {}\napi_token = \"secret\"\n",
+        db_path, port
+    );
+    if let Some(path) = failure_hook {
+        settings.push_str(&format!("failure_hook = {:?}\n", path));
+    }
+    if let Some(limit) = max_concurrent_jobs {
+        settings.push_str(&format!("max_concurrent_jobs = {limit}\n"));
+    }
+    std::fs::write(&config_path, format!("[settings]\n{settings}")).unwrap();
+    (config_path, db_path, port)
+}
+
+#[cfg(feature = "web")]
+async fn start_test_daemon(config_path: &std::path::Path) -> TestDaemon {
+    use std::process::Stdio;
+
+    let child = std::process::Command::new(assert_cmd::cargo::cargo_bin("flashcron"))
+        .arg("--config")
+        .arg(config_path)
+        .arg("run")
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap();
+    wait_for_daemon_ready(config_path).await;
+    TestDaemon(child)
+}
+
+#[cfg(feature = "web")]
+fn test_http_client() -> reqwest::Client {
+    reqwest::Client::builder()
+        .no_proxy()
+        .timeout(std::time::Duration::from_secs(5))
+        .build()
+        .unwrap()
+}
+
+#[cfg(feature = "web")]
 #[tokio::test]
 async fn test_web_job_and_script_management() {
     let _ipc_guard = super::lock_ipc_tests();
@@ -306,6 +358,245 @@ async fn test_web_job_and_script_management() {
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
     panic!("daemon did not stop after test");
+}
+
+#[cfg(feature = "web")]
+#[tokio::test]
+async fn manual_output_stream_reconnects_after_queued_execution_starts() {
+    let _ipc_guard = super::lock_ipc_tests();
+    use std::time::Duration;
+
+    let temp = tempfile::tempdir_in("/tmp").unwrap();
+    let (config_path, _, port) = write_test_web_config(&temp, None, Some(1));
+    let _daemon = start_test_daemon(&config_path).await;
+    let client = test_http_client();
+    let base = format!("http://127.0.0.1:{port}");
+
+    for (name, command) in [
+        ("blocker", "sleep 0.3"),
+        ("streamed", "printf stream_marker; sleep 0.2"),
+    ] {
+        let response = client
+            .post(format!("{base}/api/jobs"))
+            .header("Runtime-Id", "secret")
+            .json(&serde_json::json!({
+                "name": name,
+                "schedule": "0 0 1 1 *",
+                "command": command
+            }))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(response.status(), reqwest::StatusCode::CREATED);
+    }
+
+    for name in ["blocker", "streamed"] {
+        let response = client
+            .post(format!("{base}/api/jobs/{name}/trigger"))
+            .header("Runtime-Id", "secret")
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(response.status(), reqwest::StatusCode::OK);
+        if name == "streamed" {
+            let execution_id = response.json::<serde_json::Value>().await.unwrap()["execution_id"]
+                .as_str()
+                .unwrap()
+                .to_owned();
+            let endpoint =
+                format!("{base}/api/jobs/streamed/output/stream?execution_id={execution_id}");
+            let queued = client
+                .get(&endpoint)
+                .header("Runtime-Id", "secret")
+                .send()
+                .await
+                .unwrap();
+            assert_eq!(queued.status(), reqwest::StatusCode::CONFLICT);
+
+            tokio::time::timeout(Duration::from_secs(3), async {
+                loop {
+                    let jobs = client
+                        .get(format!("{base}/api/jobs"))
+                        .send()
+                        .await
+                        .unwrap()
+                        .json::<Vec<serde_json::Value>>()
+                        .await
+                        .unwrap();
+                    if jobs
+                        .iter()
+                        .any(|job| job["name"] == "streamed" && job["run_state"] == "Running")
+                    {
+                        break;
+                    }
+                    tokio::time::sleep(Duration::from_millis(10)).await;
+                }
+            })
+            .await
+            .expect("queued execution did not start");
+
+            let stream = client
+                .get(endpoint)
+                .header("Runtime-Id", "secret")
+                .send()
+                .await
+                .unwrap();
+            assert_eq!(stream.status(), reqwest::StatusCode::OK);
+            let body = stream.text().await.unwrap();
+            assert!(body.contains("stream_marker"));
+            assert!(body.contains("event: complete"));
+        }
+    }
+}
+
+#[cfg(feature = "web")]
+#[tokio::test]
+async fn settings_api_persists_and_activates_failure_hook() {
+    let _ipc_guard = super::lock_ipc_tests();
+    use std::os::unix::fs::PermissionsExt;
+    use std::time::Duration;
+
+    let temp = tempfile::tempdir_in("/tmp").unwrap();
+    let (config_path, _, port) = write_test_web_config(&temp, None, None);
+    let hook_path = temp.path().join("hook.sh");
+    let message_path = temp.path().join("hook-message");
+    std::fs::write(
+        &hook_path,
+        format!("#!/bin/sh\ncat > '{}'\n", message_path.display()),
+    )
+    .unwrap();
+    std::fs::set_permissions(&hook_path, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let _daemon = start_test_daemon(&config_path).await;
+    let client = test_http_client();
+    let base = format!("http://127.0.0.1:{port}");
+
+    let saved = client
+        .put(format!("{base}/api/settings"))
+        .header("Runtime-Id", "secret")
+        .json(&serde_json::json!({ "failure_hook": hook_path }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(saved.status(), reqwest::StatusCode::OK);
+    let config: toml::Value =
+        toml::from_str(&std::fs::read_to_string(&config_path).unwrap()).unwrap();
+    assert_eq!(
+        config["settings"]["failure_hook"].as_str(),
+        hook_path.to_str()
+    );
+
+    let created = client
+        .post(format!("{base}/api/jobs"))
+        .header("Runtime-Id", "secret")
+        .json(&serde_json::json!({
+            "name": "failure",
+            "schedule": "0 0 1 1 *",
+            "command": "exit 1"
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(created.status(), reqwest::StatusCode::CREATED);
+    let triggered = client
+        .post(format!("{base}/api/jobs/failure/trigger"))
+        .header("Runtime-Id", "secret")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(triggered.status(), reqwest::StatusCode::OK);
+
+    let message = tokio::time::timeout(Duration::from_secs(3), async {
+        loop {
+            if let Ok(bytes) = tokio::fs::read(&message_path).await {
+                if let Ok(message) = serde_json::from_slice::<serde_json::Value>(&bytes) {
+                    break message;
+                }
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("saved failure hook was not activated");
+    assert_eq!(message["job_name"], "failure");
+}
+
+#[cfg(feature = "web")]
+#[tokio::test]
+async fn clearing_settings_api_hook_removes_persistence_and_disables_it() {
+    let _ipc_guard = super::lock_ipc_tests();
+    use std::os::unix::fs::PermissionsExt;
+    use std::time::Duration;
+
+    let temp = tempfile::tempdir_in("/tmp").unwrap();
+    let hook_path = temp.path().join("hook.sh");
+    let marker_path = temp.path().join("hook-called");
+    std::fs::write(
+        &hook_path,
+        format!("#!/bin/sh\ntouch '{}'\n", marker_path.display()),
+    )
+    .unwrap();
+    std::fs::set_permissions(&hook_path, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let (config_path, _, port) = write_test_web_config(&temp, Some(&hook_path), None);
+    let _daemon = start_test_daemon(&config_path).await;
+    let client = test_http_client();
+    let base = format!("http://127.0.0.1:{port}");
+
+    let cleared = client
+        .put(format!("{base}/api/settings"))
+        .header("Runtime-Id", "secret")
+        .json(&serde_json::json!({ "failure_hook": null }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(cleared.status(), reqwest::StatusCode::OK);
+    let config: toml::Value =
+        toml::from_str(&std::fs::read_to_string(&config_path).unwrap()).unwrap();
+    assert!(config["settings"].get("failure_hook").is_none());
+
+    let created = client
+        .post(format!("{base}/api/jobs"))
+        .header("Runtime-Id", "secret")
+        .json(&serde_json::json!({
+            "name": "failure",
+            "schedule": "0 0 1 1 *",
+            "command": "exit 1"
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(created.status(), reqwest::StatusCode::CREATED);
+    let triggered = client
+        .post(format!("{base}/api/jobs/failure/trigger"))
+        .header("Runtime-Id", "secret")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(triggered.status(), reqwest::StatusCode::OK);
+
+    tokio::time::timeout(Duration::from_secs(3), async {
+        loop {
+            let jobs = client
+                .get(format!("{base}/api/jobs"))
+                .send()
+                .await
+                .unwrap()
+                .json::<Vec<serde_json::Value>>()
+                .await
+                .unwrap();
+            if jobs.iter().any(|job| {
+                job["name"] == "failure"
+                    && job["run_state"] == "Idle"
+                    && job["last_status"].get("Failed").is_some()
+            }) {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("failed job did not finish");
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    assert!(!marker_path.exists());
 }
 
 #[cfg(feature = "web")]

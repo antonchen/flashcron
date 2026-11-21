@@ -69,8 +69,11 @@ impl ScheduledJob {
         !matches!(self.run_state, JobRunState::Idle)
     }
 
-    pub fn mark_queued(&mut self) {
+    pub fn mark_queued(&mut self, execution_id: Uuid) {
         self.run_state = JobRunState::Queued;
+        self.current_execution_id = Some(execution_id);
+        self.output_sequence = 0;
+        self.live_output.clear();
     }
 
     pub fn mark_starting(&mut self) {
@@ -114,7 +117,7 @@ pub struct SchedulerState {
     pub total_jobs: usize,
     /// Number of enabled jobs
     pub enabled_jobs: usize,
-    /// Number of currently running jobs
+    /// Number of jobs holding an execution slot (Starting or Running)
     pub running_jobs: usize,
     /// Number of jobs waiting in the global queue
     pub queue_len: usize,
@@ -176,9 +179,9 @@ impl SchedulerState {
             .unwrap_or(false)
     }
 
-    pub fn record_job_queued(&mut self, job_name: &str) {
+    pub fn record_job_queued(&mut self, job_name: &str, execution_id: Uuid) {
         if let Some(job) = self.jobs.get_mut(job_name) {
-            job.mark_queued();
+            job.mark_queued(execution_id);
             self.queue_len += 1;
         }
     }
@@ -189,24 +192,31 @@ impl SchedulerState {
                 self.queue_len -= 1;
             }
             job.mark_starting();
-        }
-    }
-
-    /// Record job start
-    pub fn record_job_start(&mut self, job_name: &str, _execution_id: Uuid) {
-        if let Some(job) = self.jobs.get_mut(job_name) {
-            job.mark_started(_execution_id);
             self.running_jobs += 1;
         }
     }
 
-    pub fn update_live_output(&mut self, job_name: &str, output: String) -> Option<(Uuid, u64)> {
+    /// Record job start
+    pub fn record_job_start(&mut self, job_name: &str, execution_id: Uuid) {
         if let Some(job) = self.jobs.get_mut(job_name) {
-            job.live_output = output;
-            job.output_sequence += 1;
-            return job
-                .current_execution_id
-                .map(|execution_id| (execution_id, job.output_sequence));
+            if job.current_execution_id == Some(execution_id) {
+                job.mark_started(execution_id);
+            }
+        }
+    }
+
+    pub fn update_live_output(
+        &mut self,
+        job_name: &str,
+        execution_id: Uuid,
+        output: String,
+    ) -> Option<u64> {
+        if let Some(job) = self.jobs.get_mut(job_name) {
+            if job.current_execution_id == Some(execution_id) {
+                job.live_output = output;
+                job.output_sequence += 1;
+                return Some(job.output_sequence);
+            }
         }
         None
     }
@@ -215,21 +225,21 @@ impl SchedulerState {
     pub fn record_job_completion(
         &mut self,
         job_name: &str,
+        execution_id: Uuid,
         status: JobStatus,
         next_run: Option<DateTime<Utc>>,
     ) {
+        let was_failure = matches!(status, JobStatus::Failed { .. } | JobStatus::Timeout);
         if let Some(job) = self.jobs.get_mut(job_name) {
-            let was_failure = matches!(status, JobStatus::Failed { .. } | JobStatus::Timeout);
-            job.mark_completed(status, next_run);
-
-            if self.running_jobs > 0 {
-                self.running_jobs -= 1;
+            if job.current_execution_id == Some(execution_id) {
+                job.mark_completed(status, next_run);
             }
+        }
 
-            self.total_executions += 1;
-            if was_failure {
-                self.total_failures += 1;
-            }
+        self.running_jobs -= 1;
+        self.total_executions += 1;
+        if was_failure {
+            self.total_failures += 1;
         }
     }
 

@@ -3,6 +3,7 @@ mod jobs;
 #[cfg(feature = "dep-manager")]
 mod packages;
 mod scripts;
+mod settings;
 
 use crate::config::Config;
 use crate::config::Job;
@@ -12,7 +13,7 @@ use crate::scheduler::{ScheduledJob, SchedulerHandle, SchedulerState};
 #[cfg(feature = "dep-manager")]
 use axum::routing::delete;
 use axum::{
-    extract::{Path, Request, State},
+    extract::{Path, Query, Request, State},
     http::{Method, StatusCode},
     middleware::{self, Next},
     response::{
@@ -65,6 +66,10 @@ pub async fn start_api_server(
             get(jobs::stream_job_output),
         )
         .route("/api/jobs/{name}/trigger", post(jobs::trigger_job))
+        .route(
+            "/api/settings",
+            get(settings::get_settings).put(settings::update_settings),
+        )
         .route("/api/scripts", get(scripts::list_scripts))
         .route(
             "/api/scripts/{name}",
@@ -149,6 +154,7 @@ async fn auth_middleware(
             || path.starts_with("/api/scripts/")
             || (path == "/api/pkg" && !package_list_during_restore);
         let protected_read = protected_read || path == "/api/pkg/sources";
+        let protected_read = protected_read || path == "/api/settings";
         if (method != Method::GET && method != Method::HEAD) || protected_read {
             let provided = req
                 .headers()
@@ -287,10 +293,20 @@ async fn health_check(State(state): State<ApiState>) -> Result<&'static str, Sta
     }
 }
 
-async fn get_status(State(state): State<ApiState>) -> Json<SchedulerState> {
+async fn get_status(State(state): State<ApiState>) -> Result<Json<SchedulerState>, StatusCode> {
     let mut s = state.scheduler_state.read().await.clone();
     s.update_time();
-    Json(s)
+    if let Some(db) = &state.db {
+        if state.config.read().await.settings.max_history_size > 0 {
+            let (successes, failures) = db.execution_counts().await.map_err(|error| {
+                log::error!(status = "db execution counts failed", error = &*error.to_string(); "");
+                StatusCode::INTERNAL_SERVER_ERROR
+            })?;
+            s.total_executions = successes + failures;
+            s.total_failures = failures;
+        }
+    }
+    Ok(Json(s))
 }
 
 async fn get_system_info() -> Json<serde_json::Value> {
@@ -339,6 +355,7 @@ mod tests {
             scripts::write_script(
                 State(state.clone()),
                 Path("sample.sh".into()),
+                Query(Default::default()),
                 "#!/bin/sh\necho ok\n".into(),
             )
             .await

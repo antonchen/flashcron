@@ -64,31 +64,78 @@ pub(super) async fn read_script(
     Ok(Json(content))
 }
 
+#[derive(Default, serde::Deserialize)]
+pub(super) struct ScriptWriteQuery {
+    original_name: Option<String>,
+}
+
 pub(super) async fn write_script(
     State(state): State<ApiState>,
     Path(name): Path<String>,
+    Query(query): Query<ScriptWriteQuery>,
     body: String,
-) -> Result<StatusCode, StatusCode> {
+) -> Result<StatusCode, (StatusCode, String)> {
     let script_dir = state.config.read().await.settings.script_dir.clone();
-    let path = script_path(&script_dir, &name)?;
+    let path = script_path(&script_dir, &name)
+        .map_err(|status| (status, "Invalid script name.".into()))?;
+    let original = match query.original_name.filter(|original| original != &name) {
+        Some(original) => {
+            let original = script_path(&script_dir, &original)
+                .map_err(|status| (status, "Invalid script name.".into()))?;
+            let metadata = tokio::fs::symlink_metadata(&original)
+                .await
+                .map_err(|_| (StatusCode::NOT_FOUND, "Script no longer exists.".into()))?;
+            if !metadata.is_file() {
+                return Err((
+                    StatusCode::BAD_REQUEST,
+                    "Script must be a regular file.".into(),
+                ));
+            }
+            Some(original)
+        }
+        None => None,
+    };
     tokio::fs::create_dir_all(&script_dir)
         .await
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        .map_err(|error| (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?;
     let temp_path = script_dir.join(format!(".{}.{}.tmp", name, Uuid::new_v4()));
     if tokio::fs::write(&temp_path, body).await.is_err() {
-        return Err(StatusCode::INTERNAL_SERVER_ERROR);
+        return Err((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Could not write script file.".into(),
+        ));
     }
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
         if std::fs::set_permissions(&temp_path, std::fs::Permissions::from_mode(0o755)).is_err() {
             let _ = tokio::fs::remove_file(&temp_path).await;
-            return Err(StatusCode::INTERNAL_SERVER_ERROR);
+            return Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Could not set script permissions.".into(),
+            ));
         }
     }
-    if tokio::fs::rename(&temp_path, &path).await.is_err() {
+    if let Some(original) = original {
+        let result = tokio::fs::hard_link(&temp_path, &path).await;
         let _ = tokio::fs::remove_file(&temp_path).await;
-        return Err(StatusCode::INTERNAL_SERVER_ERROR);
+        if let Err(error) = result {
+            return Err(if error.kind() == std::io::ErrorKind::AlreadyExists {
+                (
+                    StatusCode::CONFLICT,
+                    "A script with this name already exists.".into(),
+                )
+            } else {
+                (StatusCode::INTERNAL_SERVER_ERROR, error.to_string())
+            });
+        }
+        if let Err(error) = tokio::fs::remove_file(original).await {
+            let _ = tokio::fs::remove_file(&path).await;
+            return Err((StatusCode::INTERNAL_SERVER_ERROR, error.to_string()));
+        }
+    } else if let Err(error) = tokio::fs::rename(&temp_path, &path).await {
+        let _ = tokio::fs::remove_file(&temp_path).await;
+        return Err((StatusCode::INTERNAL_SERVER_ERROR, error.to_string()));
     }
     Ok(StatusCode::NO_CONTENT)
 }

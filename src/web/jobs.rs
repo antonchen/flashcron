@@ -22,6 +22,7 @@ pub(super) async fn get_job(
 pub(super) async fn stream_job_output(
     State(state): State<ApiState>,
     Path(name): Path<String>,
+    Query(query): Query<OutputStreamQuery>,
 ) -> Result<impl axum::response::IntoResponse, StatusCode> {
     let mut events = state.handle.subscribe();
     let job = state
@@ -32,7 +33,19 @@ pub(super) async fn stream_job_output(
         .get(&name)
         .cloned()
         .ok_or(StatusCode::NOT_FOUND)?;
-    let execution_id = job.current_execution_id.ok_or(StatusCode::CONFLICT)?;
+    let execution_id = if let Some(expected_id) = query.execution_id {
+        if job.current_execution_id != Some(expected_id)
+            || matches!(
+                job.run_state,
+                crate::scheduler::JobRunState::Queued | crate::scheduler::JobRunState::Starting
+            )
+        {
+            return Err(StatusCode::CONFLICT);
+        }
+        expected_id
+    } else {
+        job.current_execution_id.ok_or(StatusCode::CONFLICT)?
+    };
     let (sender, receiver) =
         tokio::sync::mpsc::channel::<std::result::Result<Event, Infallible>>(8);
 
@@ -123,18 +136,23 @@ pub(super) async fn stream_job_output(
     Ok(Sse::new(ReceiverStream::new(receiver)).keep_alive(KeepAlive::default()))
 }
 
+#[derive(serde::Deserialize)]
+pub(super) struct OutputStreamQuery {
+    execution_id: Option<uuid::Uuid>,
+}
+
 pub(super) async fn create_job(
     State(state): State<ApiState>,
     Json(payload): Json<serde_json::Value>,
-) -> Result<(StatusCode, Json<serde_json::Value>), StatusCode> {
+) -> Result<(StatusCode, Json<serde_json::Value>), (StatusCode, String)> {
     let mut payload = payload;
     let name = payload
         .get("name")
         .and_then(serde_json::Value::as_str)
         .map(str::to_owned)
-        .ok_or(StatusCode::BAD_REQUEST)?;
+        .ok_or((StatusCode::BAD_REQUEST, "Job name is required.".into()))?;
     payload.as_object_mut().unwrap().remove("name");
-    save_job(state, name, payload, false).await?;
+    save_job(state, name, payload, false, None).await?;
     Ok((
         StatusCode::CREATED,
         Json(serde_json::json!({ "status": "created" })),
@@ -145,13 +163,16 @@ pub(super) async fn update_job(
     State(state): State<ApiState>,
     Path(name): Path<String>,
     Json(mut payload): Json<serde_json::Value>,
-) -> Result<Json<serde_json::Value>, StatusCode> {
-    if let Some(body_name) = payload.as_object_mut().and_then(|body| body.remove("name")) {
-        if body_name.as_str() != Some(name.as_str()) {
-            return Err(StatusCode::BAD_REQUEST);
-        }
-    }
-    save_job(state, name, payload, true).await?;
+) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
+    let new_name = match payload.as_object_mut().and_then(|body| body.remove("name")) {
+        Some(value) => value
+            .as_str()
+            .map(str::to_owned)
+            .ok_or((StatusCode::BAD_REQUEST, "Job name must be a string.".into()))?,
+        None => name.clone(),
+    };
+    let rename_from = (new_name != name).then_some(name);
+    save_job(state, new_name, payload, true, rename_from).await?;
     Ok(Json(serde_json::json!({ "status": "updated" })))
 }
 
@@ -160,27 +181,53 @@ pub(super) async fn save_job(
     name: String,
     payload: serde_json::Value,
     update: bool,
-) -> Result<(), StatusCode> {
+    rename_from: Option<String>,
+) -> Result<(), (StatusCode, String)> {
     if !valid_job_name(&name) {
-        return Err(StatusCode::BAD_REQUEST);
+        return Err((
+            StatusCode::BAD_REQUEST,
+            "Use 1-128 letters, digits, dots, hyphens or underscores for the job name.".into(),
+        ));
     }
-    let job: Job = serde_json::from_value(payload).map_err(|_| StatusCode::BAD_REQUEST)?;
+    let job: Job = serde_json::from_value(payload)
+        .map_err(|error| (StatusCode::BAD_REQUEST, error.to_string()))?;
     let mut job = job;
-    job.compile_schedule()
-        .map_err(|_| StatusCode::BAD_REQUEST)?;
-    job.validate(&name).map_err(|_| StatusCode::BAD_REQUEST)?;
+    job.compile_schedule().map_err(|error| {
+        (
+            StatusCode::BAD_REQUEST,
+            format!("Invalid schedule: {error}"),
+        )
+    })?;
+    job.validate(&name)
+        .map_err(|error| (StatusCode::BAD_REQUEST, error.to_string()))?;
 
-    state.db.as_ref().ok_or(StatusCode::SERVICE_UNAVAILABLE)?;
+    state.db.as_ref().ok_or((
+        StatusCode::SERVICE_UNAVAILABLE,
+        "Database is unavailable.".into(),
+    ))?;
     if !state
         .handle
-        .add_or_update_job(name, job, update)
+        .add_or_update_job(name, job, update, rename_from)
         .await
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+        .map_err(|error| match error {
+            crate::error::Error::JobNotFound { .. } => (StatusCode::NOT_FOUND, error.to_string()),
+            crate::error::Error::Scheduler(message) => (StatusCode::CONFLICT, message),
+            _ => {
+                log::error!(status = "job save failed", error = &*error.to_string(); "");
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Could not save job to the database.".into(),
+                )
+            }
+        })?
     {
         return Err(if update {
-            StatusCode::NOT_FOUND
+            (StatusCode::NOT_FOUND, "Job no longer exists.".into())
         } else {
-            StatusCode::CONFLICT
+            (
+                StatusCode::CONFLICT,
+                "A job with this name already exists.".into(),
+            )
         });
     }
     Ok(())
@@ -189,15 +236,20 @@ pub(super) async fn save_job(
 pub(super) async fn delete_job(
     State(state): State<ApiState>,
     Path(name): Path<String>,
-) -> Result<StatusCode, StatusCode> {
+) -> Result<StatusCode, (StatusCode, String)> {
     state
         .handle
         .remove_job(name)
         .await
         .map_err(|error| match error {
-            crate::error::Error::JobNotFound { .. } => StatusCode::NOT_FOUND,
-            crate::error::Error::Scheduler(_) => StatusCode::CONFLICT,
-            _ => StatusCode::INTERNAL_SERVER_ERROR,
+            crate::error::Error::JobNotFound { .. } => {
+                (StatusCode::NOT_FOUND, "Job no longer exists.".into())
+            }
+            crate::error::Error::Scheduler(message) => (StatusCode::CONFLICT, message),
+            _ => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Could not delete job. Check the service logs.".into(),
+            ),
         })?;
     Ok(StatusCode::NO_CONTENT)
 }
@@ -215,16 +267,29 @@ pub(super) fn valid_job_name(name: &str) -> bool {
 pub(super) async fn trigger_job(
     State(state): State<ApiState>,
     Path(name): Path<String>,
-) -> Result<Json<serde_json::Value>, axum::http::StatusCode> {
+) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
     let restore_phase = state.restore_status_rx.borrow().phase.clone();
     if restore_phase != PackageRestorePhase::Ready {
-        return Err(StatusCode::SERVICE_UNAVAILABLE);
+        return Err((
+            StatusCode::SERVICE_UNAVAILABLE,
+            "Wait for dependency restoration to finish.".into(),
+        ));
     }
     // Note: Logging is handled inside handle.trigger_job (engine level)
     match state.handle.trigger_job(name).await {
         Ok(execution_id) => Ok(Json(
             serde_json::json!({ "status": "triggered", "execution_id": execution_id.to_string() }),
         )),
-        Err(_) => Err(axum::http::StatusCode::INTERNAL_SERVER_ERROR),
+        Err(crate::error::Error::JobNotFound { .. }) => {
+            Err((StatusCode::NOT_FOUND, "Job no longer exists.".into()))
+        }
+        Err(crate::error::Error::Scheduler(message)) => Err((StatusCode::CONFLICT, message)),
+        Err(error) => {
+            log::error!(status = "job trigger failed", error = &*error.to_string(); "");
+            Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Could not trigger job.".into(),
+            ))
+        }
     }
 }

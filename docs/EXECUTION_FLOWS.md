@@ -14,24 +14,41 @@
 2. core 配置模块读取 TOML jobs，预编译 cron 并校验；Web 模式读取 settings，忽略 TOML jobs 并记录警告，任务从 SQLite 加载并校验。
 3. Scheduler 根据启用任务和有效时区计算下一次运行时间并建立触发队列。Web 的任务新增/编辑与删除通过 scheduler 消息串行处理，在 SQLite 提交成功后更新内存和队列；正在执行的任务继续使用已派发定义。
 4. 文件 watcher 监视配置文件所在目录，并按目标文件名过滤事件。
-5. 配置变更后重新读取和校验；core 重载 TOML jobs，Web 重载全局 settings 并保留 SQLite jobs。成功时更新 executor 默认值、重建触发队列并保留同名任务的进程内运行统计和状态。失败时记录错误，继续使用旧配置。
+5. 配置变更后重新读取和校验；core 重载 TOML jobs，Web 重载全局 settings 并保留 SQLite jobs。成功时更新 executor 默认值、重建触发队列并保留同名任务的进程内运行统计和状态。core 移除已删除任务的等待项，已开始的执行自然结束。新的并发上限立即用于派发：增大上限会推进等待队列，降低上限会等待已有执行释放名额。失败时记录错误，继续使用旧配置。
 
 ## 定时与手动触发
 
 1. Scheduler 等待优先队列中的最近触发时间或内部消息。
 2. 到期任务重新计算下一次触发时间，并检查任务是否已在队列或运行中。
-3. 同一任务在途时跳过重叠触发；全局并发名额不足时，其他任务进入 FIFO ready queue。
-4. 获得并发许可后创建执行记录和后台执行任务。
+3. 同一任务在途时跳过重叠触发；接受触发即记录 execution ID 并清空旧输出，按 FIFO 顺序进入 ready queue。
+4. 按当前 `max_concurrent_jobs` 派发任务，0 表示无限并发。任务进入 Starting 时预留名额并增加 `running_jobs`，进入 Running 时不重复计数。
 5. 手动 `trigger` 由 CLI 发 JSON 请求到 Unix socket，再由 IPC server 调用 `SchedulerHandle`；Scheduler 返回 execution ID，实际执行异步进行。
-6. 任务完成后写 SQLite（按 feature 和历史设置决定保存内容）、更新内存状态并发送完成消息以推进排队任务。
+6. 任务完成后按当前历史设置写 SQLite，释放运行名额并发送完成消息以推进排队任务。异步输出和完成回写核对 execution ID，防止旧执行覆盖重新创建的同名任务；即使任务条目已删除，也会释放该执行占用的名额。
 
 ## Shell 任务执行
 
 1. Executor 选择任务 shell 或全局 shell/参数。
 2. 设置工作目录；仅当 FlashCron 以 root 运行时切换 Linux UID/GID，`user` 留空默认使用 `nobody`，非 root 运行时忽略 `user` 并沿用服务进程身份；随后设置环境变量。
 3. 启动 shell 子进程，stdin 关闭，stdout/stderr 分别捕获。
-4. 当前实现通过有界 channel 收集两个读取任务的输出，并限制最终保留的输出大小；配置了 timeout 时对等待过程设置任务超时。
+4. 通过有界 channel 收集两个读取任务的输出。最终捕获内容按 `max_output_size` 限长，实时输出独立保留最近 8 KiB；达到捕获上限或上限为 0 时，实时输出仍持续更新。配置了 timeout 时对等待过程设置任务超时。
 5. Scheduler 根据退出码或错误决定成功、失败、超时及重试，并更新状态和数据库。
+6. 若任务耗尽重试后最终失败且配置了 `settings.failure_hook`，Scheduler 异步启动该脚本，通过 stdin 发送一行 JSON；Hook 错误仅记录日志。
+
+失败 Hook 消息示例：
+
+```json
+{
+  "event": "job.failed",
+  "job_name": "backup",
+  "trigger": "cron",
+  "ended_at": "2026-11-21T08:01:12Z",
+  "attempt": 3,
+  "error": "exit_code",
+  "output": "Backup command failed: permission denied"
+}
+```
+
+`trigger` 为 `cron`、`manual` 或 `startup`；`attempt` 是含首次执行在内的总次数；`error` 为 `exit_code`、`timeout` 或 `execution_error`。超时以及无可用输出时 `output` 为 JSON `null`。
 
 Linux 超时处理向启动时保存的进程组 ID 发送 SIGKILL，再回收直接子进程；即使 shell 已退出，仍会终止留在同一进程组并持有输出管道的后代。自行脱离该进程组的后代不在此清理范围内。APT/PIP 命令不使用任务超时路径。
 
@@ -47,20 +64,22 @@ IPC 是本机进程间的传输通道；请求/响应则构成简单的 RPC 式�
 
 ### HTTP
 
-启用 `web` 时，Axum 提供 dashboard、健康检查、scheduler 状态、任务列表/新增/编辑/删除、脚本列表/读取/写入/删除、历史和触发 API。删除任务会拒绝仍在运行的任务，并事务删除任务定义和历史；Dashboard 的全局成功/失败计数在进程内维护，重启后归零，任务条目只提供最近一次运行状态。删除脚本只删除 `settings.script_dir` 中对应文件，不扫描任务引用。脚本新建/编辑后权限为 `0755`；选择脚本仅把 shell-quoted 路径填入普通 command。任务定义及脚本内容读取、所有写入操作需要 API token。启用 `dep-manager` 时，Dashboard 提供独立的依赖管理页面，并注册依赖清单查询、添加和删除 API，以及 `GET/POST /api/pkg/restore` 恢复查询和重试接口。添加依赖会先写入 SQLite，再在后台启动同步。
+启用 `web` 时，Axum 提供 dashboard、健康检查、scheduler 状态、任务列表/新增/编辑/删除、脚本列表/读取/写入/删除、历史和触发 API。删除任务会拒绝仍在运行的任务，并事务删除任务定义和历史；Dashboard 的成功/失败计数从 SQLite 当前保留的执行历史汇总，CLI 与 scheduler 状态中的计数仅覆盖当前进程，重启后归零。任务条目只提供最近一次运行状态。删除脚本只删除 `settings.script_dir` 中对应文件，不扫描任务引用。脚本新建/编辑后权限为 `0755`；选择脚本仅把 shell-quoted 路径填入普通 command。任务定义及脚本内容读取、所有写入操作需要 API token。启用 `dep-manager` 时，Dashboard 提供独立的依赖管理页面，并注册依赖清单查询、添加和删除 API，以及 `GET/POST /api/pkg/restore` 恢复查询和重试接口。添加依赖会先写入 SQLite，再在后台启动同步。
 
 恢复期间及失败后，根路径显示恢复页，`GET /api/pkg` 与恢复接口仍可访问，其他业务 API 返回 503；`/health` 在恢复成功前也返回 503。恢复页每秒查询状态和输出，失败时显示重试表单，允许输入 API token 或使用已保存的 token，并显示查询、鉴权及重试错误。恢复成功后页面自动重新加载普通 Dashboard。
 
 API 中间件当前对非 GET/HEAD 方法校验 `Runtime-Id` 请求头中的 token，读取方法跳过鉴权。未配置 token 时启动代码生成随机 UUID 并写回 TOML 配置；token 不写入日志。前端将 token 保存在浏览器 `localStorage`，请求失败时返回错误状态供界面处理。
 
+`GET /api/settings` 与 `PUT /api/settings` 仅提供 `failure_hook` 路径读写，GET 也要求 `Runtime-Id` token。PUT 经 scheduler 消息串行写回 TOML，成功后更新当前运行设置；传入 `null` 或空白路径会移除配置并关闭 Hook。Dashboard 顶栏齿轮打开标题为“设置”的表单，通过这两个接口读取和保存该字段。
+
 ## 数据库与历史清理
 
 1. `DatabaseManager::init` 打开 `settings.sql_file` 并创建历史表；Web 创建 `jobs` 表，启用 `dep-manager` 时创建依赖清单相关表。
-2. 每次任务完成时，执行记录按历史配置写入 SQLite；成功/失败统计只更新 scheduler 的进程内状态。
+2. 每次任务完成时，在同一 SQLite 事务内插入新执行记录，删除当前任务超额的旧记录，再删除全局超额的旧记录。按 `start_time` 从新到旧保留，同一时间用 `rowid` 排序；事务失败时全部回滚。`max_history_size = 0` 不保存历史，`job_history_size = 0` 为该任务保留 0 条。成功/失败统计只更新 scheduler 的进程内状态。
 3. API/IPC 查询历史；详情查询可返回持久化输出。
 4. 启动和周期维护按每任务上限、全局上限及当前配置任务名清理记录。
 
-从当前配置删除任务后清理其历史符合产品设计。部署侧仍需持久化 SQLite 文件，才能在容器重建后保留依赖清单和需要保留的历史。
+删除 Web 任务会同步删除任务定义和执行历史，其他任务历史保留。部署侧仍需持久化 SQLite 文件，才能在容器重建后保留依赖清单和需要保留的历史。
 
 ## 依赖管理与容器恢复
 
@@ -118,7 +137,7 @@ APT 与 PIP 分组并发恢复，同组使用批量安装命令。数据库初�
 
 ## 日志、超时与关闭
 
-当前日志由 `fern` 与 `log` 输出到 stdout，可选择文本或 JSON 格式，并将 `job_name` 字段规范为 `job`。任务输出按行作为结构化日志字段写出；启用历史输出持久化时，执行结果也写入 SQLite。
+日志初始化与运行阶段使用相同的配置加载规则：Web 只加载 settings，core 加载完整配置。日志由 `fern` 与 `log` 输出到 stdout，可选择文本或 JSON 格式，并将 `job_name` 字段规范为 `job`。任务输出按行作为结构化日志字段写出；启用历史持久化时，执行结果也写入 SQLite。
 
 任务配置的 `timeout` 限制单次 shell 执行等待时间；`retry_count` 和 `retry_delay` 控制失败后的重试。守护进程收到 SIGTERM、SIGINT、SIGHUP 或 IPC `Stop` 后通知 scheduler 关闭，scheduler 最多等待 `shutdown_timeout` 让在途任务结束。依赖恢复不使用任务的 `timeout` 设置，也不增加 FlashCron 自身的安装超时；它仍需要向 HTTP/IPC 状态查询持续报告进度。
 

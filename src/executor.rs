@@ -159,15 +159,14 @@ impl JobExecutor {
             while let Some(chunk) = rx.recv().await {
                 if output.len() < max_output {
                     let remaining = max_output - output.len();
-                    let chunk = &chunk[..chunk.len().min(remaining)];
-                    output.extend_from_slice(chunk);
-                    if let Some(sender) = &live_output {
-                        live_tail.extend_from_slice(chunk);
-                        if live_tail.len() > 8192 {
-                            live_tail.drain(..live_tail.len() - 8192);
-                        }
-                        let _ = sender.send(String::from_utf8_lossy(&live_tail).into_owned());
+                    output.extend_from_slice(&chunk[..chunk.len().min(remaining)]);
+                }
+                if let Some(sender) = &live_output {
+                    live_tail.extend_from_slice(&chunk);
+                    if live_tail.len() > 8192 {
+                        live_tail.drain(..live_tail.len() - 8192);
                     }
+                    let _ = sender.send(String::from_utf8_lossy(&live_tail).into_owned());
                 }
             }
 

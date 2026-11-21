@@ -5,6 +5,28 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.0] - 2026-11-21
+
+### Added
+- Optional failure notification script configured through TOML or Dashboard Settings, receiving a JSON event after final failure with execution and output logging; includes a Python Telegram example.
+
+### Changed
+- Dashboard success and failure totals now use retained SQLite history when enabled; scheduler and CLI counters remain process-local.
+- Manual runs now open live output for the selected execution, with Run actions available for enabled and disabled jobs.
+- Allow renaming idle jobs and scripts; retain job history when renaming jobs.
+- Enforce per-job and global history limits on every write, inserting the new record and removing older entries in one transaction.
+- Apply concurrency limits on config reload, counting Starting and Running jobs against the same limit.
+- Remove the unused `log_file` setting; runtime logs are written to stdout.
+
+### Fixed
+- Show specific Dashboard errors for failed operations, including duplicate names and invalid job settings.
+- Allow unlimited concurrency without a scheduler startup panic.
+- Preserve daily execution for weekday ranges `0-7` and `1-7`, including numeric range steps.
+- Cancel removed queued jobs on core config reload and release running counts when removed executions finish.
+- Assign execution IDs before jobs start so queued manual runs keep their live log window open; stale execution updates cannot overwrite a recreated job.
+- Keep live output updating after the captured output reaches its size limit.
+- Honor Web logging settings when ignored TOML jobs contain invalid definitions.
+
 ## [1.0.0] - 2026-11-16
 
 ### Added
@@ -85,6 +107,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Aggressive release optimizations (LTO, strip)
 - Tiny binary size (~3 MB stripped)
 
+[1.1.0]: https://github.com/antonchen/flashcron/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/antonchen/flashcron/compare/v0.2.0...v1.0.0
 [0.2.0]: https://github.com/antonchen/flashcron/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/antonchen/flashcron/releases/tag/v0.1.0

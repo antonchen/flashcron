@@ -9,11 +9,13 @@ use crate::scheduler::state::{JobRunState, ScheduledJob, SchedulerState};
 use crate::scheduler::{JobTrigger, SchedulerEvent, SchedulerMessage};
 use chrono::Utc;
 use log::{debug, error, info, warn};
+use serde::Serialize;
 use std::cmp::Ordering;
 use std::collections::{BinaryHeap, VecDeque};
 use std::path::PathBuf;
 use std::sync::Arc;
-use tokio::sync::{broadcast, mpsc, OwnedSemaphorePermit, RwLock};
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWriteExt};
+use tokio::sync::{broadcast, mpsc, RwLock};
 use tokio::time::{self, Duration, Instant};
 use uuid::Uuid;
 
@@ -53,21 +55,121 @@ struct QueuedJob {
 }
 
 enum DispatchResult {
-    Started(Uuid),
-    Queued(Uuid),
+    Accepted(Uuid),
     Skipped,
 }
 
-fn should_persist_history(config: &Config) -> bool {
-    #[cfg(feature = "web")]
-    {
-        config.settings.max_history_size > 0
-    }
+#[derive(Serialize)]
+struct FailureHookMessage {
+    event: &'static str,
+    job_name: String,
+    trigger: &'static str,
+    ended_at: chrono::DateTime<Utc>,
+    attempt: u32,
+    error: &'static str,
+    output: Option<String>,
+}
 
-    #[cfg(not(feature = "web"))]
-    {
-        let _ = config;
-        false
+fn run_failure_hook(path: PathBuf, message: FailureHookMessage, job_name: String) {
+    tokio::spawn(async move {
+        let mut payload = match serde_json::to_vec(&message) {
+            Ok(payload) => payload,
+            Err(error) => {
+                error!(job_name = &*job_name, status = "failure hook serialization failed", error = &*error.to_string(); "");
+                return;
+            }
+        };
+        payload.push(b'\n');
+        info!(job_name = &*job_name, status = "failure hook starting", hook = path.to_string_lossy().as_ref(); "");
+        let mut child = match tokio::process::Command::new(&path)
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .kill_on_drop(true)
+            .spawn()
+        {
+            Ok(child) => child,
+            Err(error) => {
+                error!(job_name = &*job_name, status = "failure hook spawn failed", hook = path.to_string_lossy().as_ref(), error = &*error.to_string(); "");
+                return;
+            }
+        };
+
+        let result =
+            run_failure_hook_child(&mut child, &payload, Duration::from_secs(300), &job_name).await;
+        match result {
+            Ok(Some(status)) if status.success() => {
+                info!(job_name = &*job_name, status = "failure hook succeeded"; "");
+            }
+            Ok(Some(status)) => {
+                error!(job_name = &*job_name, status = "failure hook failed", exit_status = &*status.to_string(); "")
+            }
+            Ok(None) => {
+                error!(job_name = &*job_name, status = "failure hook timed out", timeout = "300s"; "")
+            }
+            Err(error) => {
+                error!(job_name = &*job_name, status = "failure hook wait failed", error = &*error.to_string(); "")
+            }
+        }
+    });
+}
+
+pub(super) async fn run_failure_hook_child(
+    child: &mut tokio::process::Child,
+    payload: &[u8],
+    timeout: Duration,
+    job_name: &str,
+) -> std::io::Result<Option<std::process::ExitStatus>> {
+    let stdout = child.stdout.take();
+    let stderr = child.stderr.take();
+    let run = async {
+        let wait = async {
+            let write_result = if let Some(mut stdin) = child.stdin.take() {
+                stdin.write_all(payload).await
+            } else {
+                Ok(())
+            };
+            if let Err(error) = write_result {
+                error!(job_name = job_name, status = "failure hook input failed", error = &*error.to_string(); "");
+            }
+            child.wait().await
+        };
+        let (status, (), ()) = tokio::join!(
+            wait,
+            log_failure_hook_output(stdout, job_name, "stdout"),
+            log_failure_hook_output(stderr, job_name, "stderr"),
+        );
+        status
+    };
+    match time::timeout(timeout, run).await {
+        Ok(Ok(status)) => Ok(Some(status)),
+        Ok(Err(error)) => Err(error),
+        Err(_) => {
+            let _ = child.kill().await;
+            child.wait().await?;
+            Ok(None)
+        }
+    }
+}
+
+async fn log_failure_hook_output(
+    stream: Option<impl AsyncRead + Unpin>,
+    job_name: &str,
+    stream_name: &str,
+) {
+    let Some(mut stream) = stream else { return };
+    let mut buffer = [0; 4096];
+    loop {
+        match stream.read(&mut buffer).await {
+            Ok(0) => break,
+            Ok(size) => {
+                info!(job_name = job_name, status = "failure hook output", stream = stream_name, output = String::from_utf8_lossy(&buffer[..size]).as_ref(); "");
+            }
+            Err(error) => {
+                error!(job_name = job_name, status = "failure hook output failed", stream = stream_name, error = &*error.to_string(); "");
+                break;
+            }
+        }
     }
 }
 
@@ -91,8 +193,6 @@ pub struct Scheduler {
     trigger_queue: BinaryHeap<TimedTrigger>,
     /// Jobs waiting for a free execution slot
     ready_queue: VecDeque<QueuedJob>,
-    /// Semaphore for limiting concurrent jobs
-    job_semaphore: Arc<tokio::sync::Semaphore>,
     /// Database manager
     db: Option<DatabaseManager>,
     /// Shutdown flag
@@ -121,13 +221,6 @@ impl Scheduler {
         let (message_tx, message_rx) = mpsc::channel(100);
         let (event_tx, _) = broadcast::channel(100);
 
-        let max_concurrent = config.settings.max_concurrent_jobs;
-        let semaphore = Arc::new(tokio::sync::Semaphore::new(if max_concurrent == 0 {
-            usize::MAX
-        } else {
-            max_concurrent
-        }));
-
         let executor = Arc::new(JobExecutor::new(
             config.settings.shell.clone(),
             config.settings.shell_args.clone(),
@@ -144,7 +237,6 @@ impl Scheduler {
             event_tx: event_tx.clone(),
             trigger_queue: BinaryHeap::new(),
             ready_queue: VecDeque::new(),
-            job_semaphore: semaphore,
             db,
             shutdown: false,
             restore_status,
@@ -397,7 +489,7 @@ impl Scheduler {
         }
 
         match self.dispatch_job(job_name.clone(), job, "cron").await? {
-            DispatchResult::Started(_) | DispatchResult::Queued(_) => {}
+            DispatchResult::Accepted(_) => {}
             DispatchResult::Skipped => {
                 debug!(job_name = &*job_name, status = "skipped overlap"; "");
             }
@@ -413,71 +505,44 @@ impl Scheduler {
         trigger_source: &'static str,
     ) -> crate::error::Result<DispatchResult> {
         let execution_id = Uuid::new_v4();
-        let permit = {
+        {
             let mut state = self.state.write().await;
             if !state.can_accept_trigger(&job_name) {
                 return Ok(DispatchResult::Skipped);
             }
 
-            match self.job_semaphore.clone().try_acquire_owned() {
-                Ok(permit) => {
-                    state.record_job_starting(&job_name);
-                    Some(permit)
-                }
-                Err(tokio::sync::TryAcquireError::NoPermits) => {
-                    state.record_job_queued(&job_name);
-                    None
-                }
-                Err(tokio::sync::TryAcquireError::Closed) => {
-                    return Err(Error::Scheduler("job semaphore closed".to_string()));
-                }
-            }
-        };
-
-        if let Some(permit) = permit {
-            self.spawn_job_execution(job_name, job, trigger_source, execution_id, permit)
-                .await?;
-            Ok(DispatchResult::Started(execution_id))
-        } else {
-            self.ready_queue.push_back(QueuedJob {
-                execution_id,
-                job_name,
-                job,
-                trigger_source,
-            });
-            Ok(DispatchResult::Queued(execution_id))
+            state.record_job_queued(&job_name, execution_id);
         }
+        self.ready_queue.push_back(QueuedJob {
+            execution_id,
+            job_name,
+            job,
+            trigger_source,
+        });
+        self.start_queued_jobs().await?;
+        Ok(DispatchResult::Accepted(execution_id))
     }
 
     async fn start_queued_jobs(&mut self) -> Result<()> {
+        let limit = self.config.read().await.settings.max_concurrent_jobs;
         loop {
-            if self.ready_queue.is_empty() {
-                return Ok(());
-            }
-
-            let permit = match self.job_semaphore.clone().try_acquire_owned() {
-                Ok(permit) => permit,
-                Err(tokio::sync::TryAcquireError::NoPermits) => return Ok(()),
-                Err(tokio::sync::TryAcquireError::Closed) => {
-                    return Err(Error::Scheduler("job semaphore closed".to_string()));
-                }
-            };
-
-            let queued = match self.ready_queue.pop_front() {
-                Some(queued) => queued,
-                None => return Ok(()),
-            };
-            {
+            let queued = {
                 let mut state = self.state.write().await;
+                if limit > 0 && state.running_jobs >= limit {
+                    return Ok(());
+                }
+                let Some(queued) = self.ready_queue.pop_front() else {
+                    return Ok(());
+                };
                 state.record_job_starting(&queued.job_name);
-            }
+                queued
+            };
 
             self.spawn_job_execution(
                 queued.job_name,
                 queued.job,
                 queued.trigger_source,
                 queued.execution_id,
-                permit,
             )
             .await?;
         }
@@ -490,24 +555,24 @@ impl Scheduler {
         job: Job,
         trigger_source: &'static str,
         execution_id: Uuid,
-        permit: OwnedSemaphorePermit,
     ) -> crate::error::Result<()> {
         let executor = Arc::clone(&self.executor);
         let state = Arc::clone(&self.state);
         let event_tx = self.event_tx.clone();
         let db = self.db.clone();
         let message_tx = self.message_tx.clone();
+        #[cfg(feature = "web")]
+        let config = Arc::clone(&self.config);
 
         let config_lock = self.config.read().await;
         let print_output = job
             .print_output
             .unwrap_or(config_lock.settings.print_output);
-        let persist_history = should_persist_history(&config_lock);
         let timezone = config_lock.settings.effective_timezone();
+        let failure_hook = config_lock.settings.failure_hook.clone();
         drop(config_lock);
 
         tokio::spawn(async move {
-            let _permit = permit;
             let mut execution = JobExecution::new(job_name.clone(), trigger_source);
             execution.id = execution_id;
 
@@ -539,11 +604,12 @@ impl Scheduler {
             let output_task = tokio::spawn(async move {
                 while live_output_rx.changed().await.is_ok() {
                     let output = live_output_rx.borrow_and_update().clone();
-                    let update = output_state
-                        .write()
-                        .await
-                        .update_live_output(&output_job_name, output.clone());
-                    if let Some((execution_id, sequence)) = update {
+                    let update = output_state.write().await.update_live_output(
+                        &output_job_name,
+                        execution_id,
+                        output.clone(),
+                    );
+                    if let Some(sequence) = update {
                         let _ = output_events.send(SchedulerEvent::JobOutput {
                             job_name: output_job_name.clone(),
                             execution_id,
@@ -587,6 +653,19 @@ impl Scheduler {
             let duration = started.elapsed();
             execution.attempt = attempt;
 
+            #[cfg(feature = "web")]
+            let (job_history_size, max_history_size) = {
+                let config = config.read().await;
+                (
+                    config.settings.job_history_size,
+                    config.settings.max_history_size,
+                )
+            };
+            #[cfg(not(feature = "web"))]
+            let (job_history_size, max_history_size) = (0, 0);
+            let persist_history = max_history_size > 0;
+
+            let mut failure = None;
             let (status, next_run) = match final_result {
                 Ok(result) => {
                     let exit_code = result.exit_code;
@@ -619,6 +698,7 @@ impl Scheduler {
                         )
                     } else {
                         let error_msg = format!("Exit code: {}", exit_code);
+                        failure = Some(("exit_code", (!output.is_empty()).then(|| output.clone())));
                         execution.complete_failed(
                             error_msg.clone(),
                             Some(exit_code),
@@ -640,6 +720,7 @@ impl Scheduler {
                 }
                 Err(Error::JobTimeout { .. }) => {
                     execution.complete_timeout();
+                    failure = Some(("timeout", None));
                     warn!(
                         job_name = &*job_name,
                         trigger = trigger_source,
@@ -654,6 +735,7 @@ impl Scheduler {
                 }
                 Err(e) => {
                     let error_msg = e.to_string();
+                    failure = Some(("execution_error", None));
                     execution.complete_failed(error_msg.clone(), None, None);
                     error!(
                         job_name = &*job_name,
@@ -670,11 +752,29 @@ impl Scheduler {
                 }
             };
 
+            if let (Some(path), Some((failure_kind, output))) = (failure_hook, failure) {
+                run_failure_hook(
+                    path,
+                    FailureHookMessage {
+                        event: "job.failed",
+                        job_name: job_name.clone(),
+                        trigger: trigger_source,
+                        ended_at: execution
+                            .ended_at
+                            .expect("completed executions have an end time"),
+                        attempt,
+                        error: failure_kind,
+                        output,
+                    },
+                    job_name.clone(),
+                );
+            }
+
             let success = matches!(status, JobStatus::Success);
 
             // Save to database if enabled
             if let Some(db) = db {
-                if let Err(e) = db.save(execution.clone(), persist_history).await {
+                if let Err(e) = db.save(execution, job_history_size, max_history_size).await {
                     error!(job_name = &*job_name, status = "db save failed", error = &*e.to_string(); "");
                 }
             }
@@ -682,7 +782,7 @@ impl Scheduler {
             // Update state
             {
                 let mut s = state.write().await;
-                s.record_job_completion(&job_name, status, next_run);
+                s.record_job_completion(&job_name, execution_id, status, next_run);
             }
 
             // Emit completion event
@@ -709,16 +809,50 @@ impl Scheduler {
         job_name: String,
         mut job: Job,
         update: bool,
+        rename_from: Option<String>,
     ) -> Result<bool> {
         job.compile_schedule().map_err(|reason| Error::CronParse {
             expr: job.schedule.clone(),
             reason,
         })?;
         job.validate(&job_name)?;
+        if let Some(old_name) = rename_from.as_ref() {
+            let state = self.state.read().await;
+            let old = state
+                .jobs
+                .get(old_name)
+                .ok_or_else(|| Error::job_not_found(old_name))?;
+            if old.is_in_flight() {
+                return Err(Error::Scheduler(
+                    "Wait for the job to finish before renaming it.".into(),
+                ));
+            }
+            if state.jobs.contains_key(&job_name) {
+                return Err(Error::Scheduler(
+                    "A job with this name already exists.".into(),
+                ));
+            }
+        }
         #[cfg(feature = "web")]
         if let Some(db) = &self.db {
-            if !db.store_job(job_name.clone(), job.clone(), update).await? {
+            let saved = if let Some(old_name) = rename_from.as_ref() {
+                db.rename_job(old_name.clone(), job_name.clone(), job.clone())
+                    .await?
+            } else {
+                db.store_job(job_name.clone(), job.clone(), update).await?
+            };
+            if !saved {
                 return Ok(false);
+            }
+        }
+        if let Some(old_name) = rename_from {
+            self.trigger_queue
+                .retain(|timed| timed.trigger.job_name != old_name);
+            self.config.write().await.jobs.remove(&old_name);
+            let mut state = self.state.write().await;
+            if let Some(mut previous) = state.jobs.remove(&old_name) {
+                previous.name = job_name.clone();
+                state.jobs.insert(job_name.clone(), previous);
             }
         }
         #[cfg(not(feature = "web"))]
@@ -829,9 +963,7 @@ impl Scheduler {
         drop(config);
 
         match self.dispatch_job(job_name.to_string(), job, source).await? {
-            DispatchResult::Started(execution_id) | DispatchResult::Queued(execution_id) => {
-                Ok(execution_id)
-            }
+            DispatchResult::Accepted(execution_id) => Ok(execution_id),
             DispatchResult::Skipped => Err(Error::Scheduler(format!(
                 "Job '{}' is already queued or running",
                 job_name
@@ -874,6 +1006,8 @@ impl Scheduler {
 
         // Clear and rebuild trigger queue
         self.trigger_queue.clear();
+        self.ready_queue
+            .retain(|queued| new_config.jobs.contains_key(&queued.job_name));
 
         let mut state = self.state.write().await;
 
@@ -927,6 +1061,7 @@ impl Scheduler {
         drop(state);
 
         *self.config.write().await = new_config;
+        self.start_queued_jobs().await?;
 
         info!(
             status = "config reloaded",
@@ -938,6 +1073,30 @@ impl Scheduler {
             .event_tx
             .send(SchedulerEvent::ConfigReloaded { job_count });
 
+        Ok(())
+    }
+
+    #[cfg(feature = "web")]
+    async fn set_failure_hook(&mut self, path: Option<PathBuf>) -> Result<()> {
+        let content = tokio::fs::read_to_string(&self.config_path).await?;
+        let mut document = content
+            .parse::<toml_edit::DocumentMut>()
+            .map_err(|error| Error::config(format!("Failed to parse config: {error}")))?;
+
+        if let Some(path) = path.as_ref() {
+            let path = path
+                .to_str()
+                .ok_or_else(|| Error::config("Failure hook path must be valid UTF-8"))?;
+            if !document["settings"].is_table() {
+                document["settings"] = toml_edit::table();
+            }
+            document["settings"]["failure_hook"] = toml_edit::value(path);
+        } else if let Some(settings) = document["settings"].as_table_mut() {
+            settings.remove("failure_hook");
+        }
+
+        tokio::fs::write(&self.config_path, document.to_string()).await?;
+        self.config.write().await.settings.failure_hook = path;
         Ok(())
     }
 
@@ -959,9 +1118,12 @@ impl Scheduler {
                 job_name,
                 job,
                 update,
+                rename_from,
                 response_tx,
             } => {
-                let result = self.add_or_update_job(job_name, *job, update).await;
+                let result = self
+                    .add_or_update_job(job_name, *job, update, rename_from)
+                    .await;
                 let _ = response_tx.send(result);
             }
             SchedulerMessage::RemoveJob {
@@ -969,6 +1131,10 @@ impl Scheduler {
                 response_tx,
             } => {
                 let _ = response_tx.send(self.remove_job(&job_name).await);
+            }
+            #[cfg(feature = "web")]
+            SchedulerMessage::SetFailureHook { path, response_tx } => {
+                let _ = response_tx.send(self.set_failure_hook(path).await);
             }
             SchedulerMessage::ReloadConfig => {
                 if let Err(e) = self.reload_config().await {
@@ -1026,12 +1192,14 @@ impl SchedulerHandle {
         job_name: String,
         job: Job,
         update: bool,
+        rename_from: Option<String>,
     ) -> Result<bool> {
         let (tx, rx) = tokio::sync::oneshot::channel();
         self.send(SchedulerMessage::AddOrUpdateJob {
             job_name,
             job: Box::new(job),
             update,
+            rename_from,
             response_tx: tx,
         })
         .await?;
@@ -1046,6 +1214,14 @@ impl SchedulerHandle {
         })
         .await?;
         rx.await.map_err(|_| Error::ChannelSend)?
+    }
+
+    #[cfg(feature = "web")]
+    pub async fn set_failure_hook(&self, path: Option<PathBuf>) -> Result<()> {
+        let (response_tx, response_rx) = tokio::sync::oneshot::channel();
+        self.send(SchedulerMessage::SetFailureHook { path, response_tx })
+            .await?;
+        response_rx.await.map_err(|_| Error::ChannelSend)?
     }
 
     /// Reload configuration

@@ -180,7 +180,7 @@ impl Job {
         let fields: Vec<&str> = expr.split_whitespace().collect();
         if fields.len() >= 6 {
             let dow_field = fields[5];
-            let fixed_dow = Self::normalize_dow_field(dow_field);
+            let fixed_dow = Self::normalize_dow_field(dow_field)?;
 
             // Reconstruct the expression with the fixed DOW field
             let new_fields_str: Vec<String> = fields
@@ -200,35 +200,46 @@ impl Job {
         Schedule::from_str(&expr).map_err(|e| e.to_string())
     }
 
-    fn normalize_dow_field(field: &str) -> String {
-        let parts: Vec<&str> = field.splitn(2, '/').collect();
-        let expr = parts[0];
-
-        let fixed_expr = expr
-            .split(',')
-            .map(|item| {
-                item.split('-')
-                    .map(|val| match val {
-                        "0" | "7" => "Sun",
-                        "1" => "Mon",
-                        "2" => "Tue",
-                        "3" => "Wed",
-                        "4" => "Thu",
-                        "5" => "Fri",
-                        "6" => "Sat",
-                        other => other,
-                    })
-                    .collect::<Vec<_>>()
-                    .join("-")
-            })
-            .collect::<Vec<_>>()
-            .join(",");
-
-        if parts.len() > 1 {
-            format!("{}/{}", fixed_expr, parts[1])
-        } else {
-            fixed_expr
+    fn normalize_dow_field(field: &str) -> std::result::Result<String, String> {
+        const WEEKDAYS: [&str; 7] = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+        let weekday = |value| match value {
+            "0" | "7" => "Sun",
+            "1" => "Mon",
+            "2" => "Tue",
+            "3" => "Wed",
+            "4" => "Thu",
+            "5" => "Fri",
+            "6" => "Sat",
+            other => other,
+        };
+        let mut normalized = Vec::new();
+        for item in field.split(',') {
+            let (base, step) = item.split_once('/').unwrap_or((item, "1"));
+            let (start, end) = base.split_once('-').unwrap_or((base, base));
+            if let (Ok(start), Ok(mut end)) = (start.parse::<u32>(), end.parse::<u32>()) {
+                let step = step
+                    .parse::<u32>()
+                    .map_err(|_| format!("Invalid weekday step: {item}"))?;
+                if start > 7 || end > 7 || start > end || step == 0 {
+                    return Err(format!("Invalid weekday range or step: {item}"));
+                }
+                if !base.contains('-') && item.contains('/') {
+                    end = 7;
+                }
+                // Expand before mapping Sunday so ranges ending in 7 keep their order.
+                for day in (start..=end).step_by(step as usize) {
+                    normalized.push(WEEKDAYS[(day % 7) as usize].to_owned());
+                }
+            } else {
+                let mut mapped = base.split('-').map(weekday).collect::<Vec<_>>().join("-");
+                if item.contains('/') {
+                    mapped.push('/');
+                    mapped.push_str(step);
+                }
+                normalized.push(mapped);
+            }
         }
+        Ok(normalized.join(","))
     }
 
     /// Get the next scheduled run time

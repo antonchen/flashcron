@@ -7,7 +7,11 @@ use super::args::Cli;
 /// Initialize logging using fern and log
 pub fn init_logging(cli: &Cli, config_path: &std::path::PathBuf) -> Result<()> {
     // Load config to get settings, fallback to default if not found
-    let settings = if let Ok(config) = Config::from_file(config_path) {
+    #[cfg(feature = "web")]
+    let loaded = Config::from_file_settings(config_path);
+    #[cfg(not(feature = "web"))]
+    let loaded = Config::from_file(config_path);
+    let settings = if let Ok(config) = loaded {
         config.settings
     } else {
         flashcron::config::Settings::default()

@@ -42,9 +42,6 @@ pub struct Settings {
     #[serde(default)]
     pub json_logs: bool,
 
-    /// Log file path
-    pub log_file: Option<PathBuf>,
-
     /// Maximum number of jobs that can run simultaneously
     #[serde(default = "default_max_concurrent")]
     pub max_concurrent_jobs: usize,
@@ -52,6 +49,9 @@ pub struct Settings {
     /// Default shell for executing commands
     #[serde(default = "default_shell")]
     pub shell: String,
+
+    /// Script invoked with JSON on stdin after a job's final failure
+    pub failure_hook: Option<PathBuf>,
 
     /// Arguments for the shell
     #[serde(default = "default_shell_args")]
@@ -170,9 +170,9 @@ impl Default for Settings {
             working_dir: None,
             log_level: default_log_level(),
             json_logs: false,
-            log_file: None,
             max_concurrent_jobs: default_max_concurrent(),
             shell: default_shell(),
+            failure_hook: None,
             shell_args: default_shell_args(),
             #[cfg(feature = "web")]
             job_history_size: default_job_history_size(),

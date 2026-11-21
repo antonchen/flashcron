@@ -13,7 +13,7 @@ These are product profiles, not three separate applications. Preserve the existi
 ## Design Decisions
 
 - The expected deployment is one FlashCron instance inside a container. Multi-user host socket isolation is out of scope; do not expand routine work into host-level permission hardening.
-- Removing a job from the current config may remove its persisted history and statistics. This is intentional retention behavior.
+- Deleting a job must synchronously delete its persisted execution history. Web job definitions and history are deleted in the same SQLite transaction; core config reload cancels removed queued jobs and lets started executions finish.
 - A container rebuild must restore configured dependencies from the persisted SQLite manifest. Do not treat a previous container's `Installed` status as proof that a dependency exists in the new container.
 - Package restoration must not have a FlashCron-imposed execution timeout. HTTP and IPC must become available while restore runs; scheduler job dispatch must wait until restore finishes.
 - During dependency restoration, replace the normal dashboard with restore status. Expose status through HTTP and IPC, including unmodified stdout/stderr and their merged observation order. Two separate pipes cannot establish the process-wide original write order.

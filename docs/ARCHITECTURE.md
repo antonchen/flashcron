@@ -4,7 +4,7 @@
 
 ## 产品定位
 
-FlashCron 面向容器内的周期任务运行。core 任务定义来自 TOML；启用 Web 后，任务元数据由 SQLite 保存并通过 Dashboard 管理，脚本内容由固定目录中的文件保存，任务由容器内 shell 执行。数据库也持久化执行历史和可选依赖清单；全局运行统计仅保存在当前进程内。
+FlashCron 面向容器内的周期任务运行。core 任务定义来自 TOML；启用 Web 后，任务元数据由 SQLite 保存并通过 Dashboard 管理，脚本内容由固定目录中的文件保存，任务由容器内 shell 执行。数据库也持久化执行历史和可选依赖清单；Dashboard 的成功/失败数从保留的 SQLite 执行历史汇总，scheduler 与 CLI 统计当前进程内的执行情况。
 
 项目规划了三个有意区分的产品版本：
 
@@ -68,10 +68,12 @@ flowchart LR
 ## 横切约定
 
 - 调度热路径复用预编译 cron 表达式和优先队列；避免无依据的全量配置复制或重复解析。
+- 调度器以 `running_jobs` 统一记录已取得名额的 Starting/Running 执行，按当前配置上限串行派发；上限为 0 时不限制并发，热加载后立即使用新上限。
 - Tokio worker 上不得执行阻塞式长任务。包安装等外部命令使用异步子进程接口，并将其状态交给服务层查询。
 - 运行状态日志使用 `log` crate 的结构化 key-value 字段；不要把凭据放入日志字段或消息正文。
 - Web 前端是构建时内嵌并压缩的单一 `src/web/index.html` 文件。前端 API 请求需处理网络错误。
 - API token 未配置时会在启动时随机生成并写回 TOML 配置；token 不写入日志。
+- 可选全局 `settings.failure_hook` 在任务最终失败时调用一次，通过 stdin 接收 JSON；Web Dashboard 的设置表单可修改该路径并写回 TOML，Hook 错误只记录日志，不改变任务结果。
 - 除状态/历史等既有只读接口外，任务定义与脚本内容读取也要求 API token，避免泄露 command、环境变量和脚本源码。
 - Web 任务 command 是 token 授权用户提供的 shell 命令；core command 来自部署者管理的 TOML。两者都沿用现有 shell 执行语义。
 
@@ -79,10 +81,11 @@ flowchart LR
 
 - core 模式下 TOML 是调度任务和全局设置的来源，任务从配置热加载。
 - Web 模式下 TOML 提供全局 `[settings]`；出现 `[jobs.*]` 时忽略并记录警告，不导入 TOML jobs。SQLite `jobs` 表是任务元数据唯一来源，保存与删除通过 scheduler 消息串行写库并更新内存；TOML 热重载保留数据库 jobs。
-- SQLite 保存 Web 任务元数据与执行历史；全局运行统计在进程重启后归零。`dep-manager` 启用时，SQLite 也保存受管理依赖清单、目标版本和安装状态。
+- SQLite 保存 Web 任务元数据与执行历史；每次历史写入和超额旧记录删除在同一事务中完成，同时满足每任务和全局条数限制。Dashboard 成功/失败数依据当前保留的历史记录，受历史数量限制及关闭历史持久化设置影响。Scheduler 与 CLI 计数只覆盖当前进程，重启后归零。`dep-manager` 启用时，SQLite 也保存受管理依赖清单、目标版本和安装状态。
 - Web 脚本内容只存于 `settings.script_dir`（默认位于配置文件目录下的 `scripts`）；需将该目录和 SQLite 文件放入持久卷。启动不扫描、比较或重建脚本；脚本文件变化不通知 scheduler，引用不存在文件的任务仍会触发并按 shell 执行失败记录。
 - 依赖清单是期望状态；容器文件系统中的实际安装状态是运行时状态。重建容器后必须重新对照依赖清单，不能沿用旧容器的 `Installed` 状态作为当前环境证明。
-- 当前实现中，任务从 TOML 移除后，对应历史会被清理。这是项目确认的保留策略，不视为数据丢失缺陷。
+- Web 删除任务时，在同一事务中删除任务定义及其执行历史；core 不自动持久化历史，TOML 热加载移除任务时取消尚未开始的排队执行。
+- 接受触发时即记录 execution ID；异步输出和完成回写仅更新相同 ID 的任务条目，已删除任务的执行结束仍会释放全局运行计数。
 - 当前 scheduler 的 `Idle / Queued / Starting / Running` 是任务运行状态，不等同于整个服务或依赖恢复状态。
 
 ## 关键架构约束

@@ -177,12 +177,13 @@ json_logs = false            # 适配日志采集器的 JSON 格式
 api_host = "0.0.0.0"       # Web 控制台 / API 主机
 api_port = 8080              # Web 控制台 / API 端口
 api_token = "secret"         # API 鉴权 Token (若未设置将随机生成并写入配置文件)
+# failure_hook = "/usr/local/bin/flashcron-failure-hook"  # 最终失败时调用，JSON 从 stdin 传入
 sql_file = "flashcron.db"    # SQLite 数据库文件路径
 script_dir = "scripts"       # Web 脚本目录；新建/编辑的文件设为 0755
 max_concurrent_jobs = 10     # 0 = 不限制
 shell = "/bin/sh"            # 默认 Shell
 job_history_size = 100         # 单个任务保留的最大历史条数
-max_history_size = 10000       # 全局保留的最大历史总条数，0 = 不持久化 history 输出
+max_history_size = 10000       # 全局保留的最大历史总条数，0 = 不保存执行历史
 timezone = "System"          # 时区 (如 "System", "UTC", "Asia/Shanghai")
 shutdown_timeout = 30        # 停机等待时间（秒）
 print_output = false         # 是否将任务输出打印至日志
@@ -209,8 +210,6 @@ max_output_size = 1048576    # 最大捕获输出大小 (bytes)
 run_on_startup = false       # 守护进程启动时立即运行一次
 print_output = false         # 覆盖全局 print_output 设置
 ```
-
-同一个任务若已处于 `queued`、`starting` 或 `running` 状态，新的 cron 触发会被直接跳过；不同任务在达到 `max_concurrent_jobs` 上限时会进入全局等待队列。
 
 ### Cron 表达式格式
 

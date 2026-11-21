@@ -183,10 +183,13 @@ shell = "{shell}"
 # Whether to print command execution output to stdout/stderr
 print_output = {print_output}
 
+# Optional executable script called once after a job's final failure; JSON is sent on stdin.
+# failure_hook = "/usr/local/bin/flashcron-failure-hook"
+
 {web_settings}
 
 # API authentication token for write operations (trigger, etc.)
-# If not set, a random UUID will be generated and printed to logs on startup.
+# If not set, a random UUID will be generated and persisted on startup.
 # api_token = "secret-token"
 
 # Timezone for job scheduling. Priority: TZ env > config > system > UTC

@@ -14,8 +14,11 @@ log_level = "info"
 # Output logs in JSON format (useful for log aggregators)
 json_logs = false
 
-# Maximum number of jobs that can run simultaneously (0 = unlimited)
+# Maximum Starting/Running jobs (0 = unlimited); changes apply on config reload.
 max_concurrent_jobs = 10
+
+# Optional executable script called once after a job's final failure; JSON is sent on stdin.
+# failure_hook = "/usr/local/bin/flashcron-failure-hook"
 
 # Web only: Dashboard/API bind address.
 api_host = "0.0.0.0"
@@ -23,7 +26,7 @@ api_host = "0.0.0.0"
 # Web only: Dashboard/API port.
 api_port = 8080
 
-# Web only: token required by protected API operations. If omitted, a random token is generated.
+# Web only: token required by protected API operations. If omitted, a random token is generated and persisted.
 # api_token = "your-secret-token-here"
 
 # SQLite database file path for persistence (history, statistics)
@@ -32,10 +35,10 @@ sql_file = "flashcron.db"
 # Web only: directory for scripts managed in the Dashboard.
 script_dir = "scripts"
 
-# Web only: maximum history entries retained per job.
+# Web only: maximum history entries retained per job, enforced on each write.
 job_history_size = 100
 
-# Web only: maximum history entries retained globally. 0 disables persisted history output.
+# Web only: maximum history entries retained globally, enforced on each write. 0 disables execution history.
 max_history_size = 10000
 
 # Optional default working directory for all jobs.
